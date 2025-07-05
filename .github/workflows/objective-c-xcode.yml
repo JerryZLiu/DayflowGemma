@@ -1,0 +1,212 @@
+name: Xcode - Build and Analyze
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Add this permissions block
+permissions:
+  contents: read
+  pull-requests: write  # This allows the workflow to comment on PRs
+
+jobs:
+  build:
+    name: Build and analyze default scheme
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Select Xcode version
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH"
+          xcodebuild -version
+        
+      - name: Find Xcode project
+        id: find-project
+        run: |
+          # First check the root directory
+          if [ -n "$(find . -maxdepth 1 -name "*.xcodeproj" -o -name "*.xcworkspace")" ]; then
+            echo "PROJECT_PATH=." >> $GITHUB_OUTPUT
+            echo "Xcode project found in root directory"
+          else
+            # Search subdirectories
+            PROJECT_DIR=$(find . -type d -name "*.xcodeproj" -o -name "*.xcworkspace" | head -n 1 | xargs dirname 2>/dev/null || echo "")
+            
+            if [ -n "$PROJECT_DIR" ]; then
+              echo "PROJECT_PATH=$PROJECT_DIR" >> $GITHUB_OUTPUT
+              echo "Xcode project found in: $PROJECT_DIR"
+            else
+              echo "::error::No Xcode project or workspace found in the repository"
+              exit 1
+            fi
+          fi
+          
+      - name: Set Default Scheme
+        if: steps.find-project.outputs.PROJECT_PATH != ''
+        working-directory: ${{ steps.find-project.outputs.PROJECT_PATH }}
+        run: |
+          # List available projects/workspaces for debugging
+          echo "Available Xcode projects/workspaces:"
+          ls -la *.xcodeproj *.xcworkspace 2>/dev/null || echo "None found in this directory"
+          
+          # Try to get the scheme list more safely
+          scheme_list=$(xcodebuild -list -json 2>/dev/null | tr -d "\n" || echo '{"project":{"targets":["Default"]}}')
+          default=$(echo $scheme_list | ruby -e "begin; require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]; rescue; puts 'Default'; end")
+          echo $default | cat >default
+          echo "Using default scheme: $default"
+          
+      - name: Build and analyze
+        id: build
+        if: steps.find-project.outputs.PROJECT_PATH != ''
+        working-directory: ${{ steps.find-project.outputs.PROJECT_PATH }}
+        env:
+          scheme: ${{ 'default' }}
+        run: |
+          if [ $scheme = default ]; then scheme=$(cat default); fi
+          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then 
+            filetype_parameter="workspace" 
+            file_to_build="`ls -A | grep -i \\.xcworkspace\$`"
+          else 
+            filetype_parameter="project" 
+            file_to_build="`ls -A | grep -i \\.xcodeproj\$`"
+          fi
+          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+          
+          echo "Building $filetype_parameter: $file_to_build with scheme: $scheme"
+          
+          # Run build with code signing disabled
+          xcodebuild clean build analyze \
+            -scheme "$scheme" \
+            -"$filetype_parameter" "$file_to_build" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CLANG_ANALYZER_OUTPUT=plist-html \
+            CLANG_ANALYZER_OUTPUT_DIR="$(pwd)/analyzer_reports" | tee build.log | xcpretty --report junit
+          
+          # Count warnings and errors
+          WARNINGS=$(grep -c "warning:" build.log || echo "0")
+          ERRORS=$(grep -c "error:" build.log | grep -v "No signing certificate" || echo "0")
+          
+          # Extract warnings and errors for the comment
+          if [ "$WARNINGS" -gt 0 ]; then
+            echo "WARNINGS<<EOF" >> $GITHUB_OUTPUT
+            grep "warning:" build.log | sed 's/^/- /' >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "WARNINGS=None" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "ERRORS<<EOF" >> $GITHUB_OUTPUT
+            grep "error:" build.log | grep -v "No signing certificate" | sed 's/^/- /' >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "ERRORS=None" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "WARNING_COUNT=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "ERROR_COUNT=$ERRORS" >> $GITHUB_OUTPUT
+          
+          # Display warnings but don't fail the build because of them
+          if [ "$WARNINGS" -gt 0 ]; then
+            echo "::warning::Build contains $WARNINGS warnings"
+          fi
+          
+          # Only fail on actual errors (excluding code signing errors)
+          if [ ${PIPESTATUS[0]} -ne 0 ] || [ "$ERRORS" -gt 0 ]; then
+            echo "::error::Build contains $ERRORS errors!"
+            exit 1
+          fi
+          
+      - name: Upload build log
+        if: always() && steps.find-project.outputs.PROJECT_PATH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ steps.find-project.outputs.PROJECT_PATH }}/build.log
+          
+      - name: Upload analyzer reports
+        if: always() && steps.find-project.outputs.PROJECT_PATH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-reports
+          path: ${{ steps.find-project.outputs.PROJECT_PATH }}/analyzer_reports
+          
+      - name: Add PR comment with build results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const build = ${{ steps.build.outputs.WARNING_COUNT != '' && steps.build.outputs.ERROR_COUNT != '' && 'true' || 'false' }};
+            
+            if (!build) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## ❌ Build Failed\nThe build process failed to complete. Check the logs for details.`
+              });
+              return;
+            }
+            
+            const warningCount = ${{ steps.build.outputs.WARNING_COUNT || 0 }};
+            const errorCount = ${{ steps.build.outputs.ERROR_COUNT || 0 }};
+            
+            // Create a summary
+            let status = '✅ Build Successful';
+            if (errorCount > 0) {
+              status = '❌ Build Failed';
+            } else if (warningCount > 0) {
+              status = '⚠️ Build Passed with Warnings';
+            }
+            
+            // Format warnings section
+            let warningsSection = '';
+            if (warningCount > 0) {
+              warningsSection = `<details>
+              <summary>⚠️ Warnings (${warningCount})</summary>
+              
+              \`\`\`
+              ${{ steps.build.outputs.WARNINGS }}
+              \`\`\`
+              </details>`;
+            }
+            
+            // Format errors section
+            let errorsSection = '';
+            if (errorCount > 0) {
+              errorsSection = `<details>
+              <summary>❌ Errors (${errorCount})</summary>
+              
+              \`\`\`
+              ${{ steps.build.outputs.ERRORS }}
+              \`\`\`
+              </details>`;
+            }
+            
+            // Create the comment
+            const comment = `## ${status}
+            
+            **Build Summary:**
+            - Warnings: ${warningCount}
+            - Errors: ${errorCount}
+            
+            ${warningsSection}
+            
+            ${errorsSection}
+            
+            [View full build log](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            `;
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

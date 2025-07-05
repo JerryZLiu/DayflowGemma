@@ -1,0 +1,4 @@
+*.dmg
+*.DS_Store
+Dayflow/build*
+*.xcuserstate
