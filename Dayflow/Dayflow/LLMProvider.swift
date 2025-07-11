@@ -11,7 +11,6 @@ protocol LLMProvider {
 }
 
 struct ActivityGenerationContext {
-    let previousSegmentsJSON: String
     let userTaxonomy: String
     let extractedTaxonomy: String
 }

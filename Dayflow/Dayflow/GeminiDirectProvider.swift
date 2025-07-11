@@ -7,7 +7,7 @@ import Foundation
 
 final class GeminiDirectProvider: LLMProvider {
     private let apiKey: String
-    private let genEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent"
+    private let genEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     private let fileEndpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     
     init(apiKey: String) {
@@ -25,10 +25,119 @@ final class GeminiDirectProvider: LLMProvider {
         let fileURI = try await uploadAndAwait(tempURL, mimeType: mimeType, key: apiKey).1
         
         let finalTranscriptionPrompt = """
-        Your job is to act as an expert transcriber for someone's computer usage. your descriptions should capture context and intent of the what the user is doing. 
-        for example, if the user is watching a youtube video, what's important is capturing the essence of what the video is about, not necessarily every invidiaul detail about the video. 
-        Each transcription should include a timestamp range of the particular action eg (MM:SS - MM:SS). Each transcription should also be >30seconds long, although exercise your judgement.
-         If you're going to start a separate transcription, it should be because of a big shift in context.
+        # Video Transcription Prompt
+
+        Your job is to transcribe someone's computer usage into a small number of meaningful activity segments.
+
+        ## Golden Rule: Aim for 3-5 segments per 15-minute video (fewer is better than more)
+
+        ## Core Principles:
+        1. **Group by purpose, not by platform** - If someone is planning a trip across 5 websites, that's ONE segment
+        2. **Include interruptions in the description** - Don't create segments for brief distractions
+        3. **Only split when context changes for 2-3+ minutes** - Quick checks don't count as context switches
+        4. **Combine related activities** - Multiple videos on the same topic = one segment
+        5. **Think in terms of "sessions"** - What would you tell a friend you spent time doing?
+
+        ## When to create a new segment:
+        Only when the user switches to a COMPLETELY different purpose for MORE than 2-3 minutes:
+        - Entertainment → Work
+        - Learning → Shopping  
+        - Project A → Project B
+        - Topic X → Unrelated Topic Y
+
+        ## Format:
+        ```json
+        [
+          {
+            "startTimestamp": "MM:SS",
+            "endTimestamp": "MM:SS", 
+            "description": "1-3 sentences describing what the user accomplished"
+          }
+        ]
+        ```
+
+        ## Examples:
+
+        **GOOD - Properly condensed:**
+        ```json
+        [
+          {
+            "startTimestamp": "00:00",
+            "endTimestamp": "06:45",
+            "description": "User plans a trip to Japan, researching flights on multiple booking sites, reading hotel reviews, and watching YouTube videos about Tokyo neighborhoods. They briefly check email twice and respond to a text message during their research."
+          },
+          {
+            "startTimestamp": "06:45", 
+            "endTimestamp": "10:30",
+            "description": "User takes an online Spanish course, completing lesson exercises and watching grammar explanation videos. They use Google Translate to verify some phrases and briefly check Reddit when they get stuck on a difficult concept."
+          },
+          {
+            "startTimestamp": "10:30",
+            "endTimestamp": "14:58",
+            "description": "User shops for home gym equipment, comparing prices across Amazon, fitness retailer sites, and watching product review videos. They check their banking app to verify their budget midway through."
+          }
+        ]
+        ```
+
+        **BAD - Too many segments:**
+        ```json
+        [
+          {
+            "startTimestamp": "00:00",
+            "endTimestamp": "02:00",
+            "description": "User searches for flights to Tokyo"
+          },
+          {
+            "startTimestamp": "02:00",
+            "endTimestamp": "02:30", 
+            "description": "User checks email"
+          },
+          {
+            "startTimestamp": "02:30",
+            "endTimestamp": "04:00",
+            "description": "User looks at hotels in Tokyo"
+          },
+          {
+            "startTimestamp": "04:00",
+            "endTimestamp": "05:00",
+            "description": "User watches a Tokyo travel video"
+          }
+        ]
+        ```
+
+        **ALSO BAD - Splitting brief interruptions:**
+        ```json
+        [
+          {
+            "startTimestamp": "00:00",
+            "endTimestamp": "05:00",
+            "description": "User shops for gym equipment"
+          },
+          {
+            "startTimestamp": "05:00",
+            "endTimestamp": "05:45",
+            "description": "User checks their bank balance"
+          },
+          {
+            "startTimestamp": "05:45",
+            "endTimestamp": "10:00",
+            "description": "User continues shopping for gym equipment"
+          }
+        ]
+        ```
+
+        **CORRECT way to handle the above:**
+        ```json
+        [
+          {
+            "startTimestamp": "00:00",
+            "endTimestamp": "10:00",
+            "description": "User shops for home gym equipment across multiple retailers, comparing dumbbells, benches, and resistance bands. They briefly check their bank balance around the 5-minute mark to confirm their budget before continuing."
+          }
+        ]
+        ```
+
+        Remember: The goal is to tell the story of what someone accomplished, not log every click. Group aggressively and only split when they truly change what they're doing for an extended period. If an activity is less than 2-3 minutes, it almost never deserves its own segment.
         """
         
         let response = try await geminiTranscribeRequest(
@@ -53,7 +162,7 @@ final class GeminiDirectProvider: LLMProvider {
                 endTs: Int(endDate.timeIntervalSince1970),
                 observation: chunk.description,
                 metadata: nil,
-                llmModel: "gemini-2.5-flash-preview-04-17",
+                llmModel: "gemini-2.5-flash",
                 createdAt: Date()
             )
         }
@@ -75,44 +184,60 @@ final class GeminiDirectProvider: LLMProvider {
         let transcriptText = observations.map { obs in
             let startTime = formatTimestampForPrompt(obs.startTs)
             let endTime = formatTimestampForPrompt(obs.endTs)
-            return "[\(startTime) - \(endTime)]: \(obs.observation)"
+            print("[\(startTime) - \(endTime)]: \(obs.observation)")
+            return "[" + startTime + " - " + endTime + "]: " + obs.observation
         }.joined(separator: "\n")
         
+        print("[DEBUG-GEMINI] Building transcript text from \(observations.count) observations")
+        print("[DEBUG-GEMINI] First 3 observations in prompt format:")
+        for (index, obs) in observations.prefix(3).enumerated() {
+            let startTime = formatTimestampForPrompt(obs.startTs)
+            let endTime = formatTimestampForPrompt(obs.endTs)
+            print("[DEBUG-GEMINI] Observation \(index): [\(startTime) - \(endTime)]: \(obs.observation.prefix(100))...")
+        }
+        
+        print("transcript_text: \(transcriptText)")
+        
+        // Convert existing cards to JSON string
+        let existingCardsJSON = try JSONEncoder().encode(context.existingCards)
+        let existingCardsString = String(data: existingCardsJSON, encoding: .utf8) ?? "[]"
+        
+        // Format current time
+        let formatter = ISO8601DateFormatter()
+        let currentTimeStr = formatter.string(from: context.currentTime)
+        
+        // Get the last card title for continuity hint
+        let lastCardTitle = context.existingCards.last?.title ?? "None"
+        
         let activityGenerationPrompt = """
-        You are Dayflow, an AI that converts screen recordings into a JSON timeline.
-        –––––  OUTPUT  –––––
-        Return only a JSON array of segments, each with:
-        startTimestamp (video timestamp, like 1:32)
-        endTimestamp
-        category
-        subcategory
-        title  (max 3 words, should be 1-2 usually. Something like Coding or Twitter so the user has a quick high level understanding, more precise than subcategory)
-        summary (1-2 casual sentences, **no "I"/first-person pronouns**; start with a verb and focus on what was accomplished)
-        detailed summary (longer factual description used only as context for future analysis)
-        distractions (optional array of {startTime, endTime, title, summary})
-        –––––  CORE RULES  –––––
-        Segments should always be 5+ minutes
-        Strongly prioritize keeping all continuous work related to a single project, feature, or overall goal within one segment.
-        Sub‑5 min detours → put in distractions.
-        Segments must not overlap.
-        Always try to adhere and use the user provided categories and subcategories wherever possible. If none fit, try adhering to the categories and subcategories in previous segments, which will be provided below. However, if the segment doesn't fit any of the provided taxonomy, or no taxonomy is provided, try to go with broad categories/subcategories. Some examples for reference Productive Work: [Coding, Writing, Design, Data Analysis, Project Management] Communication & Collaboration: [Email, Meetings, Slack] Distractions [Twitter, Social Media, Texting] Idle: [Idle]
-        Try not to exceed 4 subcategories.
-        Sometimes, users will be idle, in other words nothing will happen on the screen for 5+ minutes. we should create a new segment and label it Idle - Idle in that case.
-        –––––  SCATTERED‑ACTIVITY RULE  –––––
-        For any 5 + min window of rapid switching:
-        • If one activity recurs most, make it the segment; others → distractions.
-        –––––  DISTRACTION DETAILS  –––––
-        Log any distraction ≥ 30 s and < 5 min. do not log distractions that are shorter than 30s
-        –––––  CONTINUITY  –––––
-        Examine the most recent previous Segment carefully. More likely than not, the first segment of this video analysis is a continuation of the previous segment. In that case, you should do your best to use the same category/subcategory.
-        \(transcriptText)
-        OUTPUT FORMAT: JSON array of ActivityCards. startTime/endTime as MM:SS strings.
-            USER PREFERRED TAXONOMY:
-            \(context.userTaxonomy)
-            SYSTEM GENERATED TAXONOMY:
-            \(context.extractedTaxonomy)
-            PREVIOUS SEGMENT:
-            \(context.previousSegmentsJSON)
+        You are a digital anthropologist, observing a user's raw activity log. Your goal is to synthesize this log into a high-level, human-readable story of their session, presented as a series of timeline cards.
+        THE GOLDEN RULE:
+        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes or longer. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it.
+        CRITICAL DATA INTEGRITY RULE:
+        When you decide to extend a card, its original startTime is IMMUTABLE. You MUST carry over the startTime from the previous_card you are extending.
+        YOUR THINKING PROCESS:
+        Before providing your final JSON output, you must follow this internal monologue process:
+        Step 1: Identify Key Narrative Chapters.
+        First, scan all the observations. Identify the primary "chapters" of the user's session. For this specific log, the major chapters are:
+        Initial Car Research (approx. 5:00-6:05)
+        Software Development Work (approx. 6:05-6:37)
+        Financial Car Research (approx. 6:37-6:58)
+        Form a plan to group the activities into these three main narrative arcs.
+        Step 2: Generate a Draft Timeline.
+        Create a draft timeline based on your plan. As you process the log, apply the following logic:
+        Extend by Default: Your first instinct should be to extend the current card if the new observations are part of the same chapter you identified in Step 1.
+        Split on Chapter Boundaries: Create a new card only when the user clearly transitions from one of the major chapters to the next (e.g., from Initial Car Research to Software Development Work).
+        Handle Distractions: A brief, unrelated pivot (<10 min) where the user quickly returns to the chapter's main theme is a distraction, not a reason to split.
+        Step 3: Final Review and Self-Correction.
+        Before finalizing, review your generated draft against the rules and your plan from Step 1. Ask yourself:
+        Narrative Check: Does this timeline tell a clear story with three distinct chapters?
+        Boundary Check: Are the boundaries between the chapters clean? Have I accidentally merged the work session with car research?
+        Golden Rule Check: Are the cards a meaningful length? Have I avoided creating tiny, fragmented cards?
+        Integrity Check: Does the timeline start at 5:00 AM and cover the full duration?
+        If your draft fails any of these checks, revise it until it is a high-quality, A-Grade summary. Only then, provide the final JSON output.
+        INPUTS:
+        Previous cards: \(existingCardsString)
+        New observations: \(transcriptText)
         """
         
         print(activityGenerationPrompt)
@@ -142,13 +267,9 @@ final class GeminiDirectProvider: LLMProvider {
         
         print("[DEBUG] Uploading file of size: \(fileSize / 1024 / 1024) MB")
         
-        if fileSize <= 20 * 1024 * 1024 {
-            print("[DEBUG] Using simple upload")
-            uploadedFileURI = try await uploadSimple(data: fileData, mimeType: mimeType)
-        } else {
-            print("[DEBUG] Using resumable upload")
-            uploadedFileURI = try await uploadResumable(data: fileData, mimeType: mimeType)
-        }
+        // Always use resumable upload
+        print("[DEBUG] Using resumable upload")
+        uploadedFileURI = try await uploadResumable(data: fileData, mimeType: mimeType)
         
         guard let fileURI = uploadedFileURI else {
             throw NSError(domain: "GeminiError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to upload file"])
@@ -183,7 +304,7 @@ final class GeminiDirectProvider: LLMProvider {
         throw NSError(domain: "GeminiError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to parse upload response"])
     }
     
-    private func uploadResumable(data: Data, mimeType: String) async throws -> String {
+private func uploadResumable(data: Data, mimeType: String) async throws -> String {
         let metadata = GeminiFileMetadata(file: GeminiFileInfo(displayName: "dayflow_video"))
         let boundary = UUID().uuidString
         
@@ -282,24 +403,56 @@ final class GeminiDirectProvider: LLMProvider {
             "generationConfig": generationConfig
         ]
         
-        var request = URLRequest(url: URL(string: genEndpoint + "?key=\(apiKey)")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        // Retry logic with exponential backoff
+        let maxRetries = 3
+        var lastError: Error?
         
-        let (data, _) = try await URLSession.shared.data(for: request)
-        
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let firstCandidate = candidates.first,
-              let content = firstCandidate["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]],
-              let firstPart = parts.first,
-              let text = firstPart["text"] as? String else {
-            throw NSError(domain: "GeminiError", code: 7, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+        for attempt in 0..<maxRetries {
+            do {
+                var request = URLRequest(url: URL(string: genEndpoint + "?key=\(apiKey)")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+                request.timeoutInterval = 120 // 2 minutes timeout
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                // Check for rate limiting
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 429 {
+                    let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                    let delay = TimeInterval(retryAfter ?? "60") ?? 60
+                    print("[DEBUG] Rate limited, retrying after \(delay) seconds...")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let candidates = json["candidates"] as? [[String: Any]],
+                      let firstCandidate = candidates.first,
+                      let content = firstCandidate["content"] as? [String: Any],
+                      let parts = content["parts"] as? [[String: Any]],
+                      let firstPart = parts.first,
+                      let text = firstPart["text"] as? String else {
+                    throw NSError(domain: "GeminiError", code: 7, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+                }
+                
+                return text
+                
+            } catch {
+                lastError = error
+                
+                // If it's not the last attempt, wait before retrying
+                if attempt < maxRetries - 1 {
+                    let backoffDelay = pow(2.0, Double(attempt)) * 5.0 // 5s, 10s, 20s
+                    print("[DEBUG] Gemini transcribe request failed (attempt \(attempt + 1)/\(maxRetries)): \(error.localizedDescription)")
+                    print("[DEBUG] Retrying in \(backoffDelay) seconds...")
+                    try await Task.sleep(nanoseconds: UInt64(backoffDelay * 1_000_000_000))
+                }
+            }
         }
         
-        return text
+        print("[DEBUG] Gemini transcribe request failed after \(maxRetries) attempts")
+        throw lastError ?? NSError(domain: "GeminiError", code: 8, userInfo: [NSLocalizedDescriptionKey: "Request failed after \(maxRetries) attempts"])
     }
     
     // Temporary struct for parsing Gemini response
@@ -351,24 +504,56 @@ final class GeminiDirectProvider: LLMProvider {
             "generationConfig": generationConfig
         ]
         
-        var request = URLRequest(url: URL(string: genEndpoint + "?key=\(apiKey)")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        // Retry logic with exponential backoff
+        let maxRetries = 3
+        var lastError: Error?
         
-        let (data, _) = try await URLSession.shared.data(for: request)
-        
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let firstCandidate = candidates.first,
-              let content = firstCandidate["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]],
-              let firstPart = parts.first,
-              let text = firstPart["text"] as? String else {
-            throw NSError(domain: "GeminiError", code: 9, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+        for attempt in 0..<maxRetries {
+            do {
+                var request = URLRequest(url: URL(string: genEndpoint + "?key=\(apiKey)")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+                request.timeoutInterval = 120 // 2 minutes timeout
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                // Check for rate limiting
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 429 {
+                    let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                    let delay = TimeInterval(retryAfter ?? "60") ?? 60
+                    print("[DEBUG] Rate limited, retrying after \(delay) seconds...")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let candidates = json["candidates"] as? [[String: Any]],
+                      let firstCandidate = candidates.first,
+                      let content = firstCandidate["content"] as? [String: Any],
+                      let parts = content["parts"] as? [[String: Any]],
+                      let firstPart = parts.first,
+                      let text = firstPart["text"] as? String else {
+                    throw NSError(domain: "GeminiError", code: 9, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+                }
+                
+                return text
+                
+            } catch {
+                lastError = error
+                
+                // If it's not the last attempt, wait before retrying
+                if attempt < maxRetries - 1 {
+                    let backoffDelay = pow(2.0, Double(attempt)) * 5.0 // 5s, 10s, 20s
+                    print("[DEBUG] Gemini cards request failed (attempt \(attempt + 1)/\(maxRetries)): \(error.localizedDescription)")
+                    print("[DEBUG] Retrying in \(backoffDelay) seconds...")
+                    try await Task.sleep(nanoseconds: UInt64(backoffDelay * 1_000_000_000))
+                }
+            }
         }
         
-        return text
+        print("[DEBUG] Gemini cards request failed after \(maxRetries) attempts")
+        throw lastError ?? NSError(domain: "GeminiError", code: 10, userInfo: [NSLocalizedDescriptionKey: "Request failed after \(maxRetries) attempts"])
     }
     
     private func parseActivityCards(_ response: String) throws -> [ActivityCard] {

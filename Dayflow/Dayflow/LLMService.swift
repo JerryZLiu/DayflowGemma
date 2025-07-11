@@ -83,7 +83,7 @@ final class LLMService: GeminiServicing {
                 
                 // Create a combined video for transcription
                 let composition = AVMutableComposition()
-                var currentTime = CMTime.zero
+                var compositionTime = CMTime.zero
                 
                 print("[DEBUG] Combining \(chunkFiles.count) video chunks")
                 
@@ -99,16 +99,16 @@ final class LLMService: GeminiServicing {
                     let duration = try await asset.load(.duration)
                     let durationSeconds = CMTimeGetSeconds(duration)
                     
-                    print("[DEBUG] Chunk \(index): duration=\(durationSeconds)s, insertAt=\(CMTimeGetSeconds(currentTime))s")
+                    print("[DEBUG] Chunk \(index): duration=\(durationSeconds)s, insertAt=\(CMTimeGetSeconds(compositionTime))s")
                     
                     if let track = try await asset.loadTracks(withMediaType: .video).first {
-                        try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: currentTime)
+                        try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: compositionTime)
                     }
                     
-                    currentTime = CMTimeAdd(currentTime, duration)
+                    compositionTime = CMTimeAdd(compositionTime, duration)
                 }
                 
-                let totalDuration = CMTimeGetSeconds(currentTime)
+                let totalDuration = CMTimeGetSeconds(compositionTime)
                 print("[DEBUG] Total composition duration: \(totalDuration) seconds (\(totalDuration/60) minutes)")
                 
                 // Export combined video to temporary file
@@ -164,45 +164,78 @@ final class LLMService: GeminiServicing {
                     return
                 }
                 
-                // Fetch context for activity generation
-                let calendar = Calendar.current
-                let today = calendar.startOfDay(for: Date())
-                let todayString = StorageManager.shared.dateFormatter.string(from: today)
+                // SLIDING WINDOW CARD GENERATION - Replace old card generation with sliding window approach
                 
-                let previousCards = StorageManager.shared.fetchTimelineCards(forDay: todayString)
-                let previousSegmentsJSON = previousCards.isEmpty ? "[]" : (try? String(data: JSONEncoder().encode(previousCards), encoding: .utf8)) ?? "[]"
+                // Calculate time window (1 hour before current batch end time)
+                let currentTime = Date(timeIntervalSince1970: TimeInterval(batchEndTs))
+                let oneHourAgo = currentTime.addingTimeInterval(-3600) // 1 hour = 3600 seconds
                 
-                let userTaxonomy = UserDefaults.standard.string(forKey: "userTaxonomy") ?? ""
-                let extractedTaxonomy = UserDefaults.standard.string(forKey: "extractedTaxonomy") ?? ""
-                
-                let context = ActivityGenerationContext(
-                    previousSegmentsJSON: previousSegmentsJSON,
-                    userTaxonomy: userTaxonomy,
-                    extractedTaxonomy: extractedTaxonomy
+                // Fetch all observations from the last hour (instead of just current batch)
+                let recentObservations = StorageManager.shared.fetchObservationsByTimeRange(
+                    from: oneHourAgo,
+                    to: currentTime
                 )
                 
-                // Generate activity cards
-                let (cards, cardsLog) = try await provider.generateActivityCards(
-                    observations: observations,
-                    context: context
+                // Fetch existing timeline cards that overlap with the last hour
+                let existingTimelineCards = StorageManager.shared.fetchTimelineCardsByTimeRange(
+                    from: oneHourAgo,
+                    to: currentTime
                 )
                 
-                // Save activity cards as timeline cards
-                for card in cards {
-                    let timelineCard = TimelineCardShell(
-                        startTimestamp: card.startTime,
-                        endTimestamp: card.endTime,
+                // Convert TimelineCards to ActivityCards for context
+                let existingActivityCards = existingTimelineCards.map { card in
+                    ActivityCard(
+                        startTime: card.startTimestamp,
+                        endTime: card.endTimestamp,
                         category: card.category,
                         subcategory: card.subcategory,
                         title: card.title,
                         summary: card.summary,
                         detailedSummary: card.detailedSummary,
-                        day: todayString,
                         distractions: card.distractions
                     )
-                    
-                    _ = StorageManager.shared.saveTimelineCardShell(batchId: batchId, card: timelineCard)
                 }
+                
+                // Prepare context for activity generation
+                let calendar = Calendar.current
+                let today = calendar.startOfDay(for: Date())
+                let todayString = StorageManager.shared.dateFormatter.string(from: today)
+                
+                let userTaxonomy = UserDefaults.standard.string(forKey: "userTaxonomy") ?? ""
+                let extractedTaxonomy = UserDefaults.standard.string(forKey: "extractedTaxonomy") ?? ""
+                
+                let context = ActivityGenerationContext(
+                    userTaxonomy: userTaxonomy,
+                    extractedTaxonomy: extractedTaxonomy,
+                    existingCards: existingActivityCards,
+                    currentTime: currentTime
+                )
+                
+                // Generate activity cards using sliding window observations
+                let (cards, cardsLog) = try await provider.generateActivityCards(
+                    observations: recentObservations,
+                    context: context
+                )
+                
+                // Replace old cards with new ones in the time range
+                StorageManager.shared.replaceTimelineCardsInRange(
+                    from: oneHourAgo,
+                    to: currentTime,
+                    with: cards.map { card in
+                        TimelineCardShell(
+                            startTimestamp: card.startTime,
+                            endTimestamp: card.endTime,
+                            category: card.category,
+                            subcategory: card.subcategory,
+                            title: card.title,
+                            summary: card.summary,
+                            detailedSummary: card.detailedSummary,
+                            day: todayString,
+                            distractions: card.distractions
+                        )
+                    },
+                    batchId: batchId
+                )
                 
                 // Mark batch as complete
                 StorageManager.shared.updateBatch(batchId, status: "analyzed")

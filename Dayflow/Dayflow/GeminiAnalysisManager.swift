@@ -1,5 +1,5 @@
 //
-//  GeminiAnalysisManager.swift
+//  AnalysisManager.swift
 //  Dayflow
 //
 //  Re‑written 2025‑05‑07 to use the new `GeminiServicing.processBatch` API.
@@ -21,20 +21,20 @@ protocol AnalysisManaging {
 
 // MARK: – Manager -----------------------------------------------------------
 
-final class GeminiAnalysisManager: AnalysisManaging {
-    static let shared = GeminiAnalysisManager()
+final class AnalysisManager: AnalysisManaging {
+    static let shared = AnalysisManager()
     private let videoProcessingService: VideoProcessingService
     
     private init() {
         store = StorageManager.shared
-        geminiService = LLMService.shared
+        llmService = LLMService.shared
         videoProcessingService = VideoProcessingService()
-        print("GeminiAnalysisManager: Initialized")
+        print("AnalysisManager: Initialized")
     }
 
     // MARK: – Private state
     private let store: any StorageManaging
-    private let geminiService: any GeminiServicing
+    private let llmService: any LLMServicing
     
     // Added Video Processing Constants
     private let MAIN_EVENT_SUMMARY_PICK_INTERVAL_N = 30
@@ -87,17 +87,17 @@ final class GeminiAnalysisManager: AnalysisManaging {
         let batches = createBatches(from: chunks)
         // 3. Persist batch rows & join table
         let batchIDs = batches.compactMap(saveBatch)
-        // 4. Fire Gemini for each batch
+        // 4. Fire LLM for each batch
         for id in batchIDs { queueGeminiRequest(batchId: id) }
     }
 
-    // MARK: – Gemini kick‑off ----------------------------------------------
+    // MARK: – LLM kick‑off ----------------------------------------------
 
     private func queueGeminiRequest(batchId: Int64) {
         let chunksInBatch = StorageManager.shared.chunksForBatch(batchId)
 
         if chunksInBatch.isEmpty {
-            print("Warning: Batch \\(batchId) has no chunks. Marking as 'failed_empty'.")
+            print("Warning: Batch \(batchId) has no chunks. Marking as 'failed_empty'.")
             self.updateBatchStatus(batchId: batchId, status: "failed_empty")
             return
         }
@@ -110,7 +110,7 @@ final class GeminiAnalysisManager: AnalysisManaging {
         let minimumDurationSeconds: TimeInterval = 300.0 // 5 minutes
 
         if totalVideoDurationSeconds < minimumDurationSeconds {
-            print("Batch \\(batchId) duration (\\(totalVideoDurationSeconds)s) is less than \\(minimumDurationSeconds)s. Marking as 'skipped_short'.")
+            print("Batch \(batchId) duration (\(totalVideoDurationSeconds)s) is less than \(minimumDurationSeconds)s. Marking as 'skipped_short'.")
             self.updateBatchStatus(batchId: batchId, status: "skipped_short")
             return
         }
@@ -125,7 +125,7 @@ final class GeminiAnalysisManager: AnalysisManaging {
             URL(fileURLWithPath: chunk.fileUrl)
         }
 
-        geminiService.processBatch(batchId) { [weak self] (result: Result<[ActivityCard], Error>) in
+        llmService.processBatch(batchId) { [weak self] (result: Result<[ActivityCard], Error>) in
             guard let self else { return }
 
             let now = Date()
@@ -135,15 +135,15 @@ final class GeminiAnalysisManager: AnalysisManaging {
 
             switch result {
             case .success(let activityCards):
-                print("Gemini succeeded for Batch \\\\(batchId). Processing \\\\(activityCards.count) activity cards for day \\\\(currentLogicalDayString).")
+                print("LLM succeeded for Batch \(batchId). Processing \(activityCards.count) activity cards for day \(currentLogicalDayString).")
                 
                 guard let firstChunk = chunksInBatch.first else {
-                    print("Error: No chunks found for batch \\\\(batchId) during timestamp conversion")
+                    print("Error: No chunks found for batch \(batchId) during timestamp conversion")
                     self.markBatchFailed(batchId: batchId, reason: "No chunks found for timestamp conversion")
                     return
                 }
                 let firstChunkStartDate = Date(timeIntervalSince1970: TimeInterval(firstChunk.startTs))
-                print("First chunk starts at real time: \\\\(firstChunkStartDate)")
+                print("First chunk starts at real time: \(firstChunkStartDate)")
 
                 // --- Asynchronous Video Processing Task ---
                 Task { [weak self] in
@@ -326,7 +326,7 @@ final class GeminiAnalysisManager: AnalysisManaging {
                     for tempFile in temporaryFilesToDelete {
                         await self.videoProcessingService.cleanupTemporaryFile(at: tempFile)
                     }
-                    print("Temporary video files cleaned up for batch \\\\(batchId).")
+                    print("Temporary video files cleaned up for batch \(batchId).")
 
                     // Update batch status to completed if all went well (or with errors if some failed)
                     // This needs to be robust to partial failures.
@@ -337,7 +337,7 @@ final class GeminiAnalysisManager: AnalysisManaging {
                 } // End of Task for video processing
 
             case .failure(let err):
-                print("Gemini failed for Batch \(batchId). Day \(currentLogicalDayString) may have been cleared. Error: \(err.localizedDescription)")
+                print("LLM failed for Batch \(batchId). Day \(currentLogicalDayString) may have been cleared. Error: \(err.localizedDescription)")
                 self.markBatchFailed(batchId: batchId, reason: err.localizedDescription)
             }
         }
