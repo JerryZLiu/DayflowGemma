@@ -30,8 +30,12 @@ struct TimelineView: View {
     @State private var expandedActivity: TimelineActivity?
     @State private var isLoading = false
     @State private var showDatePicker = false
+    @State private var showReprocessConfirmation = false
+    @State private var isReprocessing = false
+    @State private var reprocessingProgress = ""
     
     private let storageManager = StorageManager.shared
+    private let analysisManager = AnalysisManager.shared
     
     var body: some View {
         ZStack {
@@ -45,7 +49,7 @@ struct TimelineView: View {
             
             VStack(spacing: 0) {
                 // Header
-                HeaderView(selectedDate: $selectedDate, showDatePicker: $showDatePicker)
+                HeaderView(selectedDate: $selectedDate, showDatePicker: $showDatePicker, showReprocessConfirmation: $showReprocessConfirmation)
                     .padding(.horizontal, 40)
                     .padding(.top, 30)
                 
@@ -74,6 +78,42 @@ struct TimelineView: View {
         }
         .sheet(isPresented: $showDatePicker) {
             DatePickerSheet(selectedDate: $selectedDate, isPresented: $showDatePicker)
+        }
+        .alert("Rerun Analysis", isPresented: $showReprocessConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Rerun", role: .destructive) {
+                rerunAnalysis()
+            }
+        } message: {
+            Text("This will delete all timeline cards and observations for \(formatDateForDisplay(selectedDate)), then re-transcribe and re-analyze all video recordings.\n\nThis process may take several minutes and will use LLM API credits.")
+        }
+        .overlay {
+            if isReprocessing {
+                ZStack {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                            .scaleEffect(1.5)
+                        
+                        Text("Reprocessing Day")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        
+                        Text(reprocessingProgress)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 300)
+                    }
+                    .padding(40)
+                    .background(Color(NSColor.windowBackgroundColor))
+                    .cornerRadius(16)
+                    .shadow(radius: 10)
+                }
+            }
         }
     }
     
@@ -194,12 +234,63 @@ struct TimelineView: View {
             return nil
         }
     }
+    
+    private func formatDateForDisplay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d"
+        
+        // Adjust for 4 AM boundary
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let displayDate = hour < 4 ? calendar.date(byAdding: .day, value: -1, to: date) ?? date : date
+        
+        return formatter.string(from: displayDate)
+    }
+    
+    private func rerunAnalysis() {
+        isReprocessing = true
+        reprocessingProgress = "Starting..."
+        
+        // Calculate the logical day string
+        var logicalDate = selectedDate
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: selectedDate)
+        
+        if hour < 4 {
+            logicalDate = calendar.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let dayString = formatter.string(from: logicalDate)
+        
+        analysisManager.reprocessDay(dayString, progressHandler: { progress in
+            DispatchQueue.main.async {
+                self.reprocessingProgress = progress
+            }
+        }) { result in
+            DispatchQueue.main.async {
+                self.isReprocessing = false
+                self.reprocessingProgress = ""
+                
+                switch result {
+                case .success:
+                    // Reload the activities after successful reprocessing
+                    self.loadActivities()
+                case .failure(let error):
+                    // Show error alert
+                    print("Reprocessing failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Header View
 struct HeaderView: View {
     @Binding var selectedDate: Date
     @Binding var showDatePicker: Bool
+    @Binding var showReprocessConfirmation: Bool
     
     private var displayDate: Date {
         // Adjust for 4 AM boundary for display
@@ -227,17 +318,37 @@ struct HeaderView: View {
             
             Spacer()
             
-            HStack(spacing: 15) {
-                Image(systemName: "calendar")
-                Text(dateFormatter.string(from: displayDate))
-                    .font(.system(size: 18, weight: .medium))
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            .background(Color.white.opacity(0.9))
-            .cornerRadius(20)
-            .onTapGesture {
-                showDatePicker = true
+            HStack(spacing: 12) {
+                // Date picker button
+                HStack(spacing: 15) {
+                    Image(systemName: "calendar")
+                    Text(dateFormatter.string(from: displayDate))
+                        .font(.system(size: 18, weight: .medium))
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.9))
+                .cornerRadius(20)
+                .onTapGesture {
+                    showDatePicker = true
+                }
+                
+                // Rerun analysis button
+                Button(action: {
+                    showReprocessConfirmation = true
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Rerun Analysis")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .foregroundColor(.white)
+                    .background(Color(hex: "#FF6347"))
+                    .cornerRadius(20)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }

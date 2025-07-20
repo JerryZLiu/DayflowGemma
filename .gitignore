@@ -1,4 +1,8 @@
 *.dmg
 *.DS_Store
+.DS_Store
 Dayflow/build*
 *.xcuserstate
+xcuserdata/
+LLMEvalScript.swift
+Dayflow/eval/

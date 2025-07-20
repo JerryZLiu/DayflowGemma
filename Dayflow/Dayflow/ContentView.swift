@@ -328,10 +328,6 @@ struct ContentView: View {
         let dayInfo = Date().getDayInfoFor4AMBoundary()
         currentDayString = dayInfo.dayString
         let fetchedCards = storageManager.fetchTimelineCards(forDay: currentDayString)
-        print("Fetched \(fetchedCards.count) cards for day \(currentDayString):")
-        for card in fetchedCards {
-            print("  - \(card.title) (\(card.startTimestamp) - \(card.endTimestamp)), Category: \(card.category), Subcategory: \(card.subcategory)")
-        }
         
         // Merge timeline segments with small gaps
         let mergedCards = mergeCardsWithSmallGaps(cards: fetchedCards)

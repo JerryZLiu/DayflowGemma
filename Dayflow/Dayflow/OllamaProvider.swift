@@ -83,7 +83,6 @@ final class OllamaProvider: LLMProvider {
         Observations:
         \(observationsText)
         
-        Previous segment: \(context.previousSegmentsJSON)
         User taxonomy: \(context.userTaxonomy)
         
         Return a JSON array of activity cards:

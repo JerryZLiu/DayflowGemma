@@ -17,6 +17,7 @@ protocol AnalysisManaging {
     func startAnalysisJob()
     func stopAnalysisJob()
     func triggerAnalysisNow()
+    func reprocessDay(_ day: String, progressHandler: @escaping (String) -> Void, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 // MARK: – Manager -----------------------------------------------------------
@@ -29,7 +30,6 @@ final class AnalysisManager: AnalysisManaging {
         store = StorageManager.shared
         llmService = LLMService.shared
         videoProcessingService = VideoProcessingService()
-        print("AnalysisManager: Initialized")
     }
 
     // MARK: – Private state
@@ -70,6 +70,101 @@ final class AnalysisManager: AnalysisManaging {
     func triggerAnalysisNow() {
         guard !isProcessing else { return }
         queue.async { [weak self] in self?.processRecordings() }
+    }
+    
+    func reprocessDay(_ day: String, progressHandler: @escaping (String) -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else { 
+                completion(.failure(NSError(domain: "AnalysisManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager deallocated"])))
+                return 
+            }
+            
+            DispatchQueue.main.async { progressHandler("Preparing to reprocess day \(day)...") }
+            
+            // 1. Delete existing timeline cards and get video paths to clean up
+            let videoPaths = self.store.deleteTimelineCards(forDay: day)
+            
+            // 2. Clean up video summary files
+            for path in videoPaths {
+                if let url = URL(string: path) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            
+            DispatchQueue.main.async { progressHandler("Deleted \(videoPaths.count) video summaries") }
+            
+            // 3. Get all batch IDs for the day before resetting
+            let batches = self.store.fetchBatches(forDay: day)
+            let batchIds = batches.map { $0.id }
+            
+            if batchIds.isEmpty {
+                DispatchQueue.main.async { 
+                    progressHandler("No batches found for day \(day)")
+                    completion(.success(()))
+                }
+                return
+            }
+            
+            // 4. Delete observations for these batches
+            self.store.deleteObservations(forBatchIds: batchIds)
+            DispatchQueue.main.async { progressHandler("Deleted observations for \(batchIds.count) batches") }
+            
+            // 5. Reset batch statuses to pending
+            let resetBatchIds = self.store.resetBatchStatuses(forDay: day)
+            DispatchQueue.main.async { progressHandler("Reset \(resetBatchIds.count) batches to pending status") }
+            
+            // 6. Process each batch sequentially
+            var processedCount = 0
+            var hasError = false
+            
+            for batchId in batchIds {
+                if hasError { break }
+                
+                DispatchQueue.main.async { 
+                    progressHandler("Processing batch \(processedCount + 1) of \(batchIds.count)...")
+                }
+                
+                // Use a semaphore to wait for each batch to complete
+                let semaphore = DispatchSemaphore(value: 0)
+                
+                self.queueGeminiRequest(batchId: batchId)
+                
+                // Wait for batch to complete (check status periodically)
+                var isCompleted = false
+                while !isCompleted && !hasError {
+                    Thread.sleep(forTimeInterval: 2.0) // Check every 2 seconds
+                    
+                    let currentBatches = self.store.fetchBatches(forDay: day)
+                    if let batch = currentBatches.first(where: { $0.id == batchId }) {
+                        switch batch.status {
+                        case "completed", "analyzed":
+                            isCompleted = true
+                            processedCount += 1
+                        case "failed", "failed_empty", "skipped_short":
+                            // These are acceptable end states
+                            isCompleted = true
+                            processedCount += 1
+                        case "processing":
+                            // Still processing, continue waiting
+                            break
+                        default:
+                            // Unexpected status, but continue
+                            break
+                        }
+                    }
+                }
+            }
+            
+            DispatchQueue.main.async {
+                if hasError {
+                    progressHandler("Reprocessing failed")
+                    completion(.failure(NSError(domain: "AnalysisManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to reprocess some batches"])))
+                } else {
+                    progressHandler("Successfully reprocessed \(processedCount) batches")
+                    completion(.success(()))
+                }
+            }
+        }
     }
 
     // MARK: – Timer

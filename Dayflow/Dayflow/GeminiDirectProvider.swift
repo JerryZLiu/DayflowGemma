@@ -7,7 +7,7 @@ import Foundation
 
 final class GeminiDirectProvider: LLMProvider {
     private let apiKey: String
-    private let genEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    private let genEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
     private let fileEndpoint = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     
     init(apiKey: String) {
@@ -198,46 +198,64 @@ final class GeminiDirectProvider: LLMProvider {
         
         print("transcript_text: \(transcriptText)")
         
-        // Convert existing cards to JSON string
-        let existingCardsJSON = try JSONEncoder().encode(context.existingCards)
+        // Convert existing cards to JSON string with pretty printing
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let existingCardsJSON = try encoder.encode(context.existingCards)
         let existingCardsString = String(data: existingCardsJSON, encoding: .utf8) ?? "[]"
-        
-        // Format current time
-        let formatter = ISO8601DateFormatter()
-        let currentTimeStr = formatter.string(from: context.currentTime)
-        
-        // Get the last card title for continuity hint
-        let lastCardTitle = context.existingCards.last?.title ?? "None"
         
         let activityGenerationPrompt = """
         You are a digital anthropologist, observing a user's raw activity log. Your goal is to synthesize this log into a high-level, human-readable story of their session, presented as a series of timeline cards.
         THE GOLDEN RULE:
-        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes or longer. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it.
+        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes. However, thematic coherence is essential - a card must tell a coherent story. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it.
         CRITICAL DATA INTEGRITY RULE:
-        When you decide to extend a card, its original startTime is IMMUTABLE. You MUST carry over the startTime from the previous_card you are extending.
-        YOUR THINKING PROCESS:
-        Before providing your final JSON output, you must follow this internal monologue process:
-        Step 1: Identify Key Narrative Chapters.
-        First, scan all the observations. Identify the primary "chapters" of the user's session. For this specific log, the major chapters are:
-        Initial Car Research (approx. 5:00-6:05)
-        Software Development Work (approx. 6:05-6:37)
-        Financial Car Research (approx. 6:37-6:58)
-        Form a plan to group the activities into these three main narrative arcs.
-        Step 2: Generate a Draft Timeline.
-        Create a draft timeline based on your plan. As you process the log, apply the following logic:
-        Extend by Default: Your first instinct should be to extend the current card if the new observations are part of the same chapter you identified in Step 1.
-        Split on Chapter Boundaries: Create a new card only when the user clearly transitions from one of the major chapters to the next (e.g., from Initial Car Research to Software Development Work).
-        Handle Distractions: A brief, unrelated pivot (<10 min) where the user quickly returns to the chapter's main theme is a distraction, not a reason to split.
-        Step 3: Final Review and Self-Correction.
-        Before finalizing, review your generated draft against the rules and your plan from Step 1. Ask yourself:
-        Narrative Check: Does this timeline tell a clear story with three distinct chapters?
-        Boundary Check: Are the boundaries between the chapters clean? Have I accidentally merged the work session with car research?
-        Golden Rule Check: Are the cards a meaningful length? Have I avoided creating tiny, fragmented cards?
-        Integrity Check: Does the timeline start at 5:00 AM and cover the full duration?
-        If your draft fails any of these checks, revise it until it is a high-quality, A-Grade summary. Only then, provide the final JSON output.
+        When you decide to extend a card, its original startTime is IMMUTABLE. You MUST carry over the startTime from the previous_card you are extending. Failure to preserve the original startTime is a critical error.
+        CORE DIRECTIVES:
+
+        Extend by Default: Your first instinct should be to extend the last card. When extending, you must perform these steps:
+        a. Preserve the original startTime of the card you are extending. NEVER MODIFY THE START TIMES OF CARDS
+        b. Update the endTime to reflect the latest observation.
+        c. Rewrite the summary and detailedSummary to tell the complete, unified story from the original start to the new end.
+        Group Thematically: Group activities that share a common purpose or topic. If extending would require fundamentally changing the card's title or theme, create a new card instead. Acknowledge the messy reality of multitasking within the summary.
+        Tell a Story: The title and summary of each card should tell a coherent story. How did the session start? Where did it pivot? What was the user's apparent goal or rabbit hole?
+
+        YOUR MENTAL MODEL (How to Decide):
+        Before making a decision, ask yourself these questions in order:
+
+        What is the dominant theme of the current card?
+        Do the new observations continue or relate to this theme? If yes, extend the card by following the procedure in Core Directive #1.
+        Is this a brief (<5 min) and unrelated pivot? If yes, add it as a distraction to the current card and continue extending.
+        Is this a sustained shift in focus (>15 min) that represents a different activity category or goal? If yes, create a new card regardless of the current card's length.
+        Would extending require changing the fundamental nature of what the card is about? If yes, create a new card.
+
+        DISTRACTIONS:
+        A "distraction" is a brief (<5 min) and unrelated activity that interrupts the main theme of a card. Sustained activities (>5 min) are NOT distractions - they either belong to the current theme or warrant a new card. Don't label related sub-tasks as distractions.
         INPUTS:
         Previous cards: \(existingCardsString)
         New observations: \(transcriptText)
+        
+        OUTPUT FORMAT:
+        Return ONLY a JSON array with this EXACT structure:
+        
+        [
+          {
+            "startTime": "0:00",
+            "endTime": "45:30",
+            "category": "Productive Work",
+            "subcategory": "Coding",
+            "title": "Bug Fix",
+            "summary": "Fixed authentication bug in the login flow and added error handling",
+            "detailedSummary": "Debugged issue where users were getting logged out unexpectedly. Traced problem to JWT token expiration handling. Added proper error boundaries and user-friendly error messages. Tested with multiple user accounts.",
+            "distractions": [
+              {
+                "startTime": "10:15",
+                "endTime": "11:45",
+                "title": "Twitter",
+                "summary": "Checked notifications and scrolled feed"
+              }
+            ]
+          }
+        ]
         """
         
         print(activityGenerationPrompt)
