@@ -710,7 +710,7 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             // Fetch batch IDs first
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id FROM analysis_batches
-                WHERE start_ts >= ? AND end_ts <= ?
+                WHERE batch_start_ts >= ? AND batch_end_ts <= ?
                   AND status IN ('completed', 'failed', 'processing', 'analyzed')
             """, arguments: [startTs, endTs])
             
@@ -745,14 +745,14 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         
         return (try? db.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, start_ts, end_ts, status FROM analysis_batches
-                WHERE start_ts >= ? AND end_ts <= ?
-                ORDER BY start_ts ASC
+                SELECT id, batch_start_ts, batch_end_ts, status FROM analysis_batches
+                WHERE batch_start_ts >= ? AND batch_end_ts <= ?
+                ORDER BY batch_start_ts ASC
             """, arguments: [startTs, endTs]).map { row in
                 (
                     id: row["id"] as? Int64 ?? 0,
-                    startTs: row["start_ts"] as? Int ?? 0,
-                    endTs: row["end_ts"] as? Int ?? 0,
+                    startTs: row["batch_start_ts"] as? Int ?? 0,
+                    endTs: row["batch_end_ts"] as? Int ?? 0,
                     status: row["status"] as? String ?? ""
                 )
             }

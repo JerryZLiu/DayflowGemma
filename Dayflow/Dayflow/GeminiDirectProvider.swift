@@ -146,6 +146,12 @@ final class GeminiDirectProvider: LLMProvider {
             prompt: finalTranscriptionPrompt
         )
         
+        print("\n📄 Raw Gemini Observation Generation Output:")
+        print(String(repeating: "=", count: 80))
+        print(response)
+        print(String(repeating: "=", count: 80))
+        print("\n")
+        
         let videoTranscripts = try parseTranscripts(response)
         
         // Convert video transcripts to observations with proper Unix timestamps
@@ -154,6 +160,13 @@ final class GeminiDirectProvider: LLMProvider {
             let endSeconds = parseVideoTimestamp(chunk.endTimestamp)
             let startDate = batchStartTime.addingTimeInterval(TimeInterval(startSeconds))
             let endDate = batchStartTime.addingTimeInterval(TimeInterval(endSeconds))
+            
+            print("\n🔍 Observation Timestamp Conversion:")
+            print("  Video timestamp: \(chunk.startTimestamp) - \(chunk.endTimestamp)")
+            print("  Seconds from video start: \(startSeconds) - \(endSeconds)")
+            print("  Batch start time: \(batchStartTime)")
+            print("  Calculated dates: \(startDate) - \(endDate)")
+            print("  Unix timestamps: \(Int(startDate.timeIntervalSince1970)) - \(Int(endDate.timeIntervalSince1970))")
             
             return Observation(
                 id: nil,
@@ -184,7 +197,13 @@ final class GeminiDirectProvider: LLMProvider {
         let transcriptText = observations.map { obs in
             let startTime = formatTimestampForPrompt(obs.startTs)
             let endTime = formatTimestampForPrompt(obs.endTs)
-            print("[\(startTime) - \(endTime)]: \(obs.observation)")
+            
+            print("\n🕐 Activity Card Generation - Timestamp Conversion:")
+            print("  Unix timestamps from DB: \(obs.startTs) - \(obs.endTs)")
+            print("  Converted to dates: \(Date(timeIntervalSince1970: TimeInterval(obs.startTs))) - \(Date(timeIntervalSince1970: TimeInterval(obs.endTs)))")
+            print("  Formatted for prompt: [\(startTime) - \(endTime)]")
+            print("  Observation: \(obs.observation)")
+            
             return "[" + startTime + " - " + endTime + "]: " + obs.observation
         }.joined(separator: "\n")
         
@@ -207,7 +226,7 @@ final class GeminiDirectProvider: LLMProvider {
         let activityGenerationPrompt = """
         You are a digital anthropologist, observing a user's raw activity log. Your goal is to synthesize this log into a high-level, human-readable story of their session, presented as a series of timeline cards.
         THE GOLDEN RULE:
-        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes. However, thematic coherence is essential - a card must tell a coherent story. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it.
+        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes. However, thematic coherence is essential - a card must tell a coherent story. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it. 
         CRITICAL DATA INTEGRITY RULE:
         When you decide to extend a card, its original startTime is IMMUTABLE. You MUST carry over the startTime from the previous_card you are extending. Failure to preserve the original startTime is a critical error.
         CORE DIRECTIVES:
@@ -218,6 +237,50 @@ final class GeminiDirectProvider: LLMProvider {
         c. Rewrite the summary and detailedSummary to tell the complete, unified story from the original start to the new end.
         Group Thematically: Group activities that share a common purpose or topic. If extending would require fundamentally changing the card's title or theme, create a new card instead. Acknowledge the messy reality of multitasking within the summary.
         Tell a Story: The title and summary of each card should tell a coherent story. How did the session start? Where did it pivot? What was the user's apparent goal or rabbit hole?
+        Title guidelines:
+        Write titles like you're texting a friend about what you did. Natural, conversational, direct.
+
+        Rules:
+        - Be specific and clear (not creative or vague)
+        - Keep it short - aim for 5-10 words
+        - Don't reference other cards or assume context
+        - Include main activity + distraction if relevant
+
+        Good examples:
+        - "Edited photos in Lightroom"
+        - "Python tutorial on Codecademy"
+        - "Watched 3 episodes on Netflix"
+        - "Wrote blog post, kept checking Instagram"
+        - "Researched flights to Tokyo"
+
+        Bad examples:
+        - "Early morning digital drift" (too vague/poetic)
+        - "Fell down a rabbit hole after lunch" (too long, assumes context)
+        - "Extended Browsing Session" (too formal)
+        - "Random browsing and activities" (not specific)
+        - "Continuing from earlier" (references other cards)
+
+        Summary guidelines:
+        Write summaries like journal entries - first person without using "I". Natural, conversational, factual.
+
+        Rules:
+        - 2-3 sentences that add context beyond the title
+        - Connect to earlier/later activities when relevant ("continued from earlier", "finally got back to")
+        - Be specific about what happened without listing every detail
+        - Include subtle context words that feel natural ("ended up", "kept getting distracted", "spent way too long")
+        - Never assume the user's feelings or intentions ("loved it", "got frustrated", "decided to buy")
+
+        Good examples:
+        - "Watched several React tutorials on YouTube before switching to the official docs. Ended up refactoring components in VS Code while referencing the useEffect documentation."
+        - "Read through NVIDIA's investor relations page, focusing on their latest quarterly filing. Then pulled up AMD's earnings for comparison and took notes in Notion."
+        - "Browsed meal prep ideas on Pinterest and various food blogs. Started a grocery list in Notes and looked up several chicken recipes for the week."
+        - "Spent the morning on Zillow and StreetEasy looking at apartments near subway lines. Created a spreadsheet to compare options and started bookmarking promising listings."
+
+        Bad examples:
+        - "The user conducted extensive research..." (too formal, third person)
+        - "Started with X, then did Y, then moved to Z" (formulaic)
+        - "Loved the reviews and decided to buy one" (assumes feelings)
+        - "Looked at 47 different websites" (false precision)
 
         YOUR MENTAL MODEL (How to Decide):
         Before making a decision, ask yourself these questions in order:
@@ -226,45 +289,116 @@ final class GeminiDirectProvider: LLMProvider {
         Do the new observations continue or relate to this theme? If yes, extend the card by following the procedure in Core Directive #1.
         Is this a brief (<5 min) and unrelated pivot? If yes, add it as a distraction to the current card and continue extending.
         Is this a sustained shift in focus (>15 min) that represents a different activity category or goal? If yes, create a new card regardless of the current card's length.
-        Would extending require changing the fundamental nature of what the card is about? If yes, create a new card.
 
         DISTRACTIONS:
         A "distraction" is a brief (<5 min) and unrelated activity that interrupts the main theme of a card. Sustained activities (>5 min) are NOT distractions - they either belong to the current theme or warrant a new card. Don't label related sub-tasks as distractions.
+
         INPUTS:
         Previous cards: \(existingCardsString)
         New observations: \(transcriptText)
-        
-        OUTPUT FORMAT:
         Return ONLY a JSON array with this EXACT structure:
-        
-        [
-          {
-            "startTime": "0:00",
-            "endTime": "45:30",
-            "category": "Productive Work",
-            "subcategory": "Coding",
-            "title": "Bug Fix",
-            "summary": "Fixed authentication bug in the login flow and added error handling",
-            "detailedSummary": "Debugged issue where users were getting logged out unexpectedly. Traced problem to JWT token expiration handling. Added proper error boundaries and user-friendly error messages. Tested with multiple user accounts.",
-            "distractions": [
-              {
-                "startTime": "10:15",
-                "endTime": "11:45",
-                "title": "Twitter",
-                "summary": "Checked notifications and scrolled feed"
-              }
-            ]
-          }
-        ]
+                
+                [
+                  {
+                    "startTime": "1:12 AM",
+                    "endTime": "1:30 AM",
+                    "category": "Productive Work",
+                    "subcategory": "Coding",
+                    "title": "Working on auth bug in Dayflow",
+                    "summary": "Fixed authentication bug in the login flow and added error handling",
+                    "detailedSummary": "Debugged issue where users were getting logged out unexpectedly. Traced problem to JWT token expiration handling. Added proper error boundaries and user-friendly error messages. Tested with multiple user accounts.",
+                    "distractions": [
+                      {
+                        "startTime": "1:15 AM",
+                        "endTime": "1:18 AM",
+                        "title": "Twitter",
+                        "summary": "Checked notifications and scrolled feed"
+                      }
+                    ]
+                  }
+                ]
         """
         
         print(activityGenerationPrompt)
         
-        let response = try await geminiCardsRequest(
+        // Initial request
+        var response = try await geminiCardsRequest(
             prompt: activityGenerationPrompt
         )
         
-        let cards = try parseActivityCards(response)
+        var cards = try parseActivityCards(response)
+        
+        // Combined validation and retry loop
+        var retryCount = 0
+        let maxRetries = 3
+        
+        while retryCount < maxRetries {
+            // Run both validations
+            let (coverageValid, coverageError) = validateTimeCoverage(existingCards: context.existingCards, newCards: cards)
+            let (durationValid, durationError) = validateTimeline(cards)
+            
+            // Check if both validations pass
+            if coverageValid && durationValid {
+                if retryCount > 0 {
+                    print("✅ All validations passed after \(retryCount) retries")
+                } else {
+                    print("✅ All validations passed on first attempt")
+                }
+                break
+            }
+            
+            retryCount += 1
+            
+            // Build error message combining both validation failures
+            var errorMessages: [String] = []
+            
+            if !coverageValid && coverageError != nil {
+                print("⚠️ Time coverage validation failed: \(coverageError!)")
+                errorMessages.append("""
+                TIME COVERAGE ERROR:
+                \(coverageError!)
+                
+                You MUST ensure your output cards collectively cover ALL time periods from the input cards. Do not drop any time segments.
+                """)
+            }
+            
+            if !durationValid && durationError != nil {
+                print("⚠️ Timeline duration validation failed: \(durationError!)")
+                if !coverageValid || retryCount == 1 {
+                    // Print raw output on first failure or if both validations fail
+                    print("\n📄 Raw LLM output:")
+                    print(response)
+                }
+                errorMessages.append("""
+                DURATION ERROR:
+                \(durationError!)
+                
+                REMINDER: All cards except the last one must be at least 10 minutes long. Please merge short activities into longer, more meaningful cards that tell a coherent story.
+                """)
+            }
+            
+            if retryCount >= maxRetries {
+                print("⚠️ Validation failed after \(maxRetries) retries. Proceeding with best effort.")
+                break
+            }
+            
+            print("🔄 Retrying with enhanced prompt (attempt \(retryCount)/\(maxRetries))...")
+            
+            // Enhanced prompt with all error details
+            let retryPrompt = activityGenerationPrompt + """
+            
+            
+            PREVIOUS ATTEMPT FAILED - CRITICAL REQUIREMENTS NOT MET:
+            
+            \(errorMessages.joined(separator: "\n\n"))
+            
+            Please fix these issues and ensure your output meets all requirements.
+            """
+            
+            // Retry with enhanced prompt
+            response = try await geminiCardsRequest(prompt: retryPrompt)
+            cards = try parseActivityCards(response)
+        }
         
         let log = LLMCall(
             timestamp: callStart,
@@ -504,7 +638,7 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 ],
                 "required": ["startTimestamp", "endTimestamp", "category", "subcategory", "title", "summary", "detailedSummary"],
                 "propertyOrdering": ["startTimestamp", "endTimestamp", "category", "subcategory", "title", "summary", "detailedSummary", "distractions"]
-            ]
+            ]   
         ]
         
         let generationConfig: [String: Any] = [
@@ -620,6 +754,215 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 }
             )
         }
+    }
+    
+    // MARK: - Validation Helpers
+    
+    private struct TimeRange {
+        let start: Double  // minutes from midnight
+        let end: Double
+    }
+    
+    private func timeToMinutes(_ timeStr: String) -> Double {
+        // Handle both "10:30 AM" and "05:30" formats
+        if timeStr.contains("AM") || timeStr.contains("PM") {
+            // Clock format - parse as date
+            let formatter = DateFormatter()
+            formatter.dateFormat = "h:mm a"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            
+            if let date = formatter.date(from: timeStr) {
+                let calendar = Calendar.current
+                let components = calendar.dateComponents([.hour, .minute], from: date)
+                return Double((components.hour ?? 0) * 60 + (components.minute ?? 0))
+            }
+            return 0
+        } else {
+            // MM:SS format - convert to minutes
+            let seconds = parseVideoTimestamp(timeStr)
+            return Double(seconds) / 60.0
+        }
+    }
+    
+    private func mergeOverlappingRanges(_ ranges: [TimeRange]) -> [TimeRange] {
+        guard !ranges.isEmpty else { return [] }
+        
+        // Sort by start time
+        let sorted = ranges.sorted { $0.start < $1.start }
+        var merged: [TimeRange] = []
+        
+        for range in sorted {
+            if merged.isEmpty || range.start > merged.last!.end + 1 {
+                // No overlap - add as new range
+                merged.append(range)
+            } else {
+                // Overlap or adjacent - merge with last range
+                let last = merged.removeLast()
+                merged.append(TimeRange(start: last.start, end: max(last.end, range.end)))
+            }
+        }
+        
+        return merged
+    }
+    
+    private func validateTimeCoverage(existingCards: [ActivityCard], newCards: [ActivityCard]) -> (isValid: Bool, error: String?) {
+        guard !existingCards.isEmpty else {
+            return (true, nil)
+        }
+        
+        // Extract time ranges from input cards
+        var inputRanges: [TimeRange] = []
+        for card in existingCards {
+            let startMin = timeToMinutes(card.startTime)
+            var endMin = timeToMinutes(card.endTime)
+            if endMin < startMin {  // Handle day rollover
+                endMin += 24 * 60
+            }
+            inputRanges.append(TimeRange(start: startMin, end: endMin))
+        }
+        
+        // Merge overlapping/adjacent ranges
+        let mergedInputRanges = mergeOverlappingRanges(inputRanges)
+        
+        // Extract time ranges from output cards
+        var outputRanges: [TimeRange] = []
+        for card in newCards {
+            let startMin = timeToMinutes(card.startTime)
+            var endMin = timeToMinutes(card.endTime)
+            if endMin < startMin {  // Handle day rollover
+                endMin += 24 * 60
+            }
+            outputRanges.append(TimeRange(start: startMin, end: endMin))
+        }
+        
+        // Check coverage with 3-minute flexibility
+        let flexibility = 3.0  // minutes
+        var uncoveredSegments: [(start: Double, end: Double)] = []
+        
+        for inputRange in mergedInputRanges {
+            // Check if this input range is covered by output ranges
+            var coveredStart = inputRange.start
+            
+            while coveredStart < inputRange.end {
+                // Find an output range that covers this point
+                var foundCoverage = false
+                
+                for outputRange in outputRanges {
+                    // Check if this output range covers the current point (with flexibility)
+                    if outputRange.start - flexibility <= coveredStart && coveredStart <= outputRange.end + flexibility {
+                        // Move coveredStart to the end of this output range
+                        coveredStart = outputRange.end
+                        foundCoverage = true
+                        break
+                    }
+                }
+                
+                if !foundCoverage {
+                    // Find the next covered point
+                    var nextCovered = inputRange.end
+                    for outputRange in outputRanges {
+                        if outputRange.start > coveredStart && outputRange.start < nextCovered {
+                            nextCovered = outputRange.start
+                        }
+                    }
+                    
+                    // Add uncovered segment
+                    if nextCovered > coveredStart {
+                        uncoveredSegments.append((start: coveredStart, end: min(nextCovered, inputRange.end)))
+                        coveredStart = nextCovered
+                    } else {
+                        // No more coverage found, add remaining segment and break
+                        uncoveredSegments.append((start: coveredStart, end: inputRange.end))
+                        break
+                    }
+                }
+            }
+        }
+        
+        // Check if uncovered segments are significant
+        if !uncoveredSegments.isEmpty {
+            var uncoveredDesc: [String] = []
+            for segment in uncoveredSegments {
+                let duration = segment.end - segment.start
+                if duration > flexibility {  // Only report significant gaps
+                    let startTime = minutesToTimeString(segment.start)
+                    let endTime = minutesToTimeString(segment.end)
+                    uncoveredDesc.append("\(startTime)-\(endTime) (\(Int(duration)) min)")
+                }
+            }
+            
+            if !uncoveredDesc.isEmpty {
+                // Build detailed error message with input/output cards
+                var errorMsg = "Missing coverage for time segments: \(uncoveredDesc.joined(separator: ", "))"
+                errorMsg += "\n\n📥 INPUT CARDS:"
+                for (i, card) in existingCards.enumerated() {
+                    errorMsg += "\n  \(i+1). \(card.startTime) - \(card.endTime): \(card.title)"
+                }
+                errorMsg += "\n\n📤 OUTPUT CARDS:"
+                for (i, card) in newCards.enumerated() {
+                    errorMsg += "\n  \(i+1). \(card.startTime) - \(card.endTime): \(card.title)"
+                }
+                
+                return (false, errorMsg)
+            }
+        }
+        
+        return (true, nil)
+    }
+    
+    private func validateTimeline(_ cards: [ActivityCard]) -> (isValid: Bool, error: String?) {
+        for (index, card) in cards.enumerated() {
+            let startTime = card.startTime
+            let endTime = card.endTime
+            
+            var durationMinutes: Double = 0
+            
+            // Check if times are in clock format (contains AM/PM)
+            if startTime.contains("AM") || startTime.contains("PM") {
+                // Parse clock times
+                let formatter = DateFormatter()
+                formatter.dateFormat = "h:mm a"
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                
+                if let startDate = formatter.date(from: startTime),
+                   let endDate = formatter.date(from: endTime) {
+                    
+                    var adjustedEndDate = endDate
+                    // Handle day rollover (e.g., 11:30 PM to 12:30 AM)
+                    if endDate < startDate {
+                        adjustedEndDate = Calendar.current.date(byAdding: .day, value: 1, to: endDate) ?? endDate
+                    }
+                    
+                    durationMinutes = adjustedEndDate.timeIntervalSince(startDate) / 60.0
+                } else {
+                    print("[DEBUG] Failed to parse clock times: \(startTime) - \(endTime)")
+                    durationMinutes = 0
+                }
+            } else {
+                // Parse MM:SS format
+                let startSeconds = parseVideoTimestamp(startTime)
+                let endSeconds = parseVideoTimestamp(endTime)
+                durationMinutes = Double(endSeconds - startSeconds) / 60.0
+            }
+            
+            // Check if card is too short (except for last card)
+            if durationMinutes < 10 && index < cards.count - 1 {
+                return (false, "Card \(index + 1) '\(card.title)' is only \(String(format: "%.1f", durationMinutes)) minutes long")
+            }
+        }
+        
+        return (true, nil)
+    }
+    
+    private func minutesToTimeString(_ minutes: Double) -> String {
+        let hours = (Int(minutes) / 60) % 24  // Handle > 24 hours
+        let mins = Int(minutes) % 60
+        let period = hours < 12 ? "AM" : "PM"
+        var displayHour = hours % 12
+        if displayHour == 0 {
+            displayHour = 12
+        }
+        return String(format: "%d:%02d %@", displayHour, mins, period)
     }
 }
 

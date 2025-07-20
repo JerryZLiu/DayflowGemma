@@ -40,15 +40,28 @@ struct ActivityCard: Codable {
 // MARK: - Helper Extensions for Timestamp Conversion
 
 extension LLMProvider {
-    // Convert "MM:SS" to seconds from video start
+    // Convert "MM:SS" or "HH:MM:SS" to seconds from video start
     func parseVideoTimestamp(_ timestamp: String) -> Int {
         let components = timestamp.components(separatedBy: ":")
-        guard components.count == 2,
-              let minutes = Int(components[0]),
-              let seconds = Int(components[1]) else {
-            return 0
+        
+        if components.count == 3 {
+            // HH:MM:SS format
+            guard let hours = Int(components[0]),
+                  let minutes = Int(components[1]),
+                  let seconds = Int(components[2]) else {
+                return 0
+            }
+            return hours * 3600 + minutes * 60 + seconds
+        } else if components.count == 2 {
+            // MM:SS format
+            guard let minutes = Int(components[0]),
+                  let seconds = Int(components[1]) else {
+                return 0
+            }
+            return minutes * 60 + seconds
         }
-        return minutes * 60 + seconds
+        
+        return 0
     }
     
     // Convert Unix timestamp to "h:mm a" for prompts

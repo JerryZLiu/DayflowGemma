@@ -276,17 +276,19 @@ final class AnalysisManager: AnalysisManaging {
                             var processedDistractionInfos: [ProcessedDistractionInfo] = []
                             var currentDbCardId: Int64? = nil
 
-                            // Calculate actual start and end timestamps first
-                            guard let videoStartInterval = self.parseVideoTimestamp(activityCard.startTime),
-                                  let videoEndInterval = self.parseVideoTimestamp(activityCard.endTime) else {
-                                print("Error: Could not parse video timestamps (shell creation): start=\(activityCard.startTime), end=\(activityCard.endTime) for card '\(activityCard.title)'. Skipping card.")
-                                // If we can't determine timestamps, we can't reliably save or process the card.
+                            // Use the clock timestamps directly from the LLM
+                            let finalStartTimestamp = activityCard.startTime
+                            let finalEndTimestamp = activityCard.endTime
+                            
+                            // Parse clock times to get video intervals for video processing
+                            guard let actualStartDate = self.parseClockTime(activityCard.startTime, baseDate: firstChunkStartDate),
+                                  let actualEndDate = self.parseClockTime(activityCard.endTime, baseDate: firstChunkStartDate) else {
+                                print("Error: Could not parse clock timestamps: start=\(activityCard.startTime), end=\(activityCard.endTime) for card '\(activityCard.title)'. Skipping card.")
                                 continue
                             }
-                            let actualStartDate = firstChunkStartDate.addingTimeInterval(videoStartInterval)
-                            let actualEndDate = firstChunkStartDate.addingTimeInterval(videoEndInterval)
-                            let finalStartTimestamp = self.formatAsClockTime(actualStartDate)
-                            let finalEndTimestamp = self.formatAsClockTime(actualEndDate)
+                            
+                            let videoStartInterval = actualStartDate.timeIntervalSince(firstChunkStartDate)
+                            let videoEndInterval = actualEndDate.timeIntervalSince(firstChunkStartDate)
 
                             // 1. Create and save TimelineCardShell to get its DB ID
                             let cardShell = TimelineCardShell(
@@ -350,26 +352,28 @@ final class AnalysisManager: AnalysisManaging {
                             // 4. Process distractions for this activity card (using the full batch video as source)
                             if let fullBatchVideo = mainBatchVideoURL, let originalDistractions = activityCard.distractions {
                                 for dist in originalDistractions {
-                                    // ... (distraction processing remains largely the same, using fullBatchVideo)
-                                    // It generates names like batch_X_dist_Y_summary.mp4 - this is acceptable for now.
-                                    // Ensure PDistractionInfo is populated correctly for later TimelineCard construction
-                                    guard let distStartInterval = self.parseVideoTimestamp(dist.startTime),
-                                          let distEndInterval = self.parseVideoTimestamp(dist.endTime) else {
-                                        print("Error: Could not parse distraction video timestamps for summary: start=\(dist.startTime), end=\(dist.endTime)")
-                                        let distClockStart = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(self.parseVideoTimestamp(dist.startTime) ?? 0.0))
-                                        let distClockEnd = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(self.parseVideoTimestamp(dist.endTime) ?? 0.0))
+                                    // Distractions also use clock times now
+                                    let distClockStart = dist.startTime
+                                    let distClockEnd = dist.endTime
+                                    
+                                    // Parse clock times to get video intervals
+                                    guard let distStartDate = self.parseClockTime(dist.startTime, baseDate: firstChunkStartDate),
+                                          let distEndDate = self.parseClockTime(dist.endTime, baseDate: firstChunkStartDate) else {
+                                        print("Error: Could not parse distraction clock timestamps: start=\(dist.startTime), end=\(dist.endTime)")
                                         processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: distClockStart, clockEndTime: distClockEnd, videoSummaryPath: nil))
                                         continue
                                     }
+                                    
+                                    let distStartInterval = distStartDate.timeIntervalSince(firstChunkStartDate)
+                                    let distEndInterval = distEndDate.timeIntervalSince(firstChunkStartDate)
                                     let distractionDuration = distEndInterval - distStartInterval
+                                    
                                     if distractionDuration <= 0 {
                                         print("Warning: Distraction '\(dist.title)' has non-positive duration. Skipping summary generation.")
-                                        let distClockStart = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(distStartInterval))
-                                        let distClockEnd = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(distEndInterval))
                                         processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: distClockStart, clockEndTime: distClockEnd, videoSummaryPath: nil))
                                         continue
                                     }
-                                    // ... (rest of distraction video generation, path assigned to distractionSummaryPath)
+                                    
                                     let distractionSegmentURL = try await self.videoProcessingService.extractSegment(
                                         from: fullBatchVideo,
                                         startTime: distStartInterval,
@@ -384,15 +388,13 @@ final class AnalysisManager: AnalysisManaging {
                                         inputFramePickIntervalFactorN: self.DISTRACTION_SUMMARY_PICK_INTERVAL_N
                                     )
                                     let distractionSummaryPath = persistentDistractionSummaryURL.path
-                                    let distClockStart = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(distStartInterval))
-                                    let distClockEnd = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(distEndInterval))
+                                    // distClockStart and distClockEnd are already set above
                                     processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: distClockStart, clockEndTime: distClockEnd, videoSummaryPath: distractionSummaryPath))
                                 }
                             } else if let originalDistractions = activityCard.distractions {
+                                // No video available, but still need to record distractions with their clock times
                                 for dist in originalDistractions {
-                                    let distClockStart = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(self.parseVideoTimestamp(dist.startTime) ?? 0.0))
-                                    let distClockEnd = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(self.parseVideoTimestamp(dist.endTime) ?? 0.0))
-                                    processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: distClockStart, clockEndTime: distClockEnd, videoSummaryPath: nil))
+                                    processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: dist.startTime, clockEndTime: dist.endTime, videoSummaryPath: nil))
                                 }
                             }
                             allProcessedCardInfo.append(ProcessedCardInfo(activityCard: activityCard, dbCardId: currentDbCardId, activityCardSummaryPath: activitySpecificSummaryPath, processedDistractions: processedDistractionInfos))
@@ -405,11 +407,8 @@ final class AnalysisManager: AnalysisManaging {
                                 var processedDistractionInfos: [ProcessedDistractionInfo] = []
                                 if let originalDistractions = activityCard.distractions {
                                     for dist in originalDistractions {
-                                        let parsedDistStartInterval = self.parseVideoTimestamp(dist.startTime)
-                                        let parsedDistEndInterval = self.parseVideoTimestamp(dist.endTime)
-                                        let distClockStart = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(parsedDistStartInterval ?? 0.0))
-                                        let distClockEnd = self.formatAsClockTime(firstChunkStartDate.addingTimeInterval(parsedDistEndInterval ?? 0.0))
-                                        processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: distClockStart, clockEndTime: distClockEnd, videoSummaryPath: nil))
+                                        // Use clock times directly since LLM now outputs in clock format
+                                        processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: dist.startTime, clockEndTime: dist.endTime, videoSummaryPath: nil))
                                     }
                                 }
                                 allProcessedCardInfo.append(ProcessedCardInfo(activityCard: activityCard, dbCardId: nil, activityCardSummaryPath: nil, processedDistractions: processedDistractionInfos))
@@ -545,5 +544,22 @@ private func createBatches(from chunks: [RecordingChunk]) -> [AnalysisBatch] {
         formatter.dateFormat = "h:mm a" // e.g., "11:37 AM"
         formatter.timeZone = TimeZone.current
         return formatter.string(from: date)
+    }
+    
+    // Parses a clock time like "11:37 AM" to a Date
+    private func parseClockTime(_ timeString: String, baseDate: Date) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        guard let time = formatter.date(from: timeString) else { return nil }
+        
+        let calendar = Calendar.current
+        let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
+        
+        return calendar.date(bySettingHour: timeComponents.hour ?? 0,
+                           minute: timeComponents.minute ?? 0,
+                           second: 0,
+                           of: baseDate)
     }
 }
