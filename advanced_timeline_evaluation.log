@@ -1,0 +1,53 @@
+2025-07-28 16:43:51,836 - INFO - Starting advanced timeline strategy evaluation
+2025-07-28 16:43:51,836 - INFO - Loaded 81 observations
+2025-07-28 16:43:51,837 - INFO - 
+Testing: Conservative (90/85, no cap)
+2025-07-28 16:43:51,838 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,839 - INFO - After first pass: 81 cards
+2025-07-28 16:43:51,841 - INFO - After second pass: 79 cards
+2025-07-28 16:43:51,844 - INFO -   Cards: 79
+2025-07-28 16:43:51,845 - INFO -   Avg duration: 5.7 min
+2025-07-28 16:43:51,845 - INFO -   Continuity: 0.50
+2025-07-28 16:43:51,845 - INFO - 
+Testing: Balanced (85/80, no cap)
+2025-07-28 16:43:51,846 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,847 - INFO - After first pass: 79 cards
+2025-07-28 16:43:51,848 - INFO - After second pass: 70 cards
+2025-07-28 16:43:51,850 - INFO -   Cards: 70
+2025-07-28 16:43:51,850 - INFO -   Avg duration: 6.4 min
+2025-07-28 16:43:51,850 - INFO -   Continuity: 0.46
+2025-07-28 16:43:51,850 - INFO - 
+Testing: Aggressive (80/70, no cap)
+2025-07-28 16:43:51,851 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,852 - INFO - After first pass: 72 cards
+2025-07-28 16:43:51,854 - INFO - After second pass: 57 cards
+2025-07-28 16:43:51,856 - INFO -   Cards: 57
+2025-07-28 16:43:51,856 - INFO -   Avg duration: 7.9 min
+2025-07-28 16:43:51,856 - INFO -   Continuity: 0.49
+2025-07-28 16:43:51,856 - INFO - 
+Testing: Balanced + 25min cap
+2025-07-28 16:43:51,857 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,858 - INFO - After first pass: 79 cards
+2025-07-28 16:43:51,859 - INFO - After second pass: 70 cards
+2025-07-28 16:43:51,860 - INFO - After hard cap: 70 cards
+2025-07-28 16:43:51,861 - INFO -   Cards: 70
+2025-07-28 16:43:51,861 - INFO -   Avg duration: 6.4 min
+2025-07-28 16:43:51,861 - INFO -   Continuity: 0.46
+2025-07-28 16:43:51,861 - INFO - 
+Testing: Balanced + 20min cap
+2025-07-28 16:43:51,863 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,864 - INFO - After first pass: 79 cards
+2025-07-28 16:43:51,865 - INFO - After second pass: 70 cards
+2025-07-28 16:43:51,865 - INFO - After hard cap: 70 cards
+2025-07-28 16:43:51,867 - INFO -   Cards: 70
+2025-07-28 16:43:51,867 - INFO -   Avg duration: 6.4 min
+2025-07-28 16:43:51,867 - INFO -   Continuity: 0.46
+2025-07-28 16:43:51,867 - INFO - 
+Testing: Conservative + 30min cap
+2025-07-28 16:43:51,868 - INFO - Created 81 initial activity cards
+2025-07-28 16:43:51,870 - INFO - After first pass: 81 cards
+2025-07-28 16:43:51,872 - INFO - After second pass: 79 cards
+2025-07-28 16:43:51,872 - INFO - After hard cap: 79 cards
+2025-07-28 16:43:51,874 - INFO -   Cards: 79
+2025-07-28 16:43:51,874 - INFO -   Avg duration: 5.7 min
+2025-07-28 16:43:51,874 - INFO -   Continuity: 0.50

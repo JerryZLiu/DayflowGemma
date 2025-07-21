@@ -10,30 +10,34 @@ import AVFoundation
 import SwiftUI
 import GRDB
 
-protocol GeminiServicing {
-    func processBatch(_ batchId: Int64, completion: @escaping (Result<[ActivityCard], Error>) -> Void)
+struct ProcessedBatchResult {
+    let cards: [ActivityCard]
+    let cardIds: [Int64]
 }
 
-final class LLMService: GeminiServicing {
-    static let shared: GeminiServicing = LLMService()
+protocol LLMServicing {
+    func processBatch(_ batchId: Int64, completion: @escaping (Result<ProcessedBatchResult, Error>) -> Void)
+}
+
+final class LLMService: LLMServicing {
+    static let shared: LLMServicing = LLMService()
     
     private var providerType: LLMProviderType {
         // Read directly from UserDefaults each time
         guard let savedData = UserDefaults.standard.data(forKey: "llmProviderType") else {
-            print("[LLMService] DEBUG: No saved data found in UserDefaults for key 'llmProviderType'")
+            // No saved provider type
             // Default to Gemini with empty API key
             return .geminiDirect(apiKey: "")
         }
         
-        print("[LLMService] DEBUG: Found saved data of size: \(savedData.count) bytes")
+        // Found saved provider type
         
         do {
             let decoded = try JSONDecoder().decode(LLMProviderType.self, from: savedData)
-            print("[LLMService] DEBUG: Successfully decoded provider type: \(decoded)")
+            // Successfully decoded provider type
             return decoded
         } catch {
-            print("[LLMService] DEBUG: Failed to decode provider type: \(error)")
-            print("[LLMService] DEBUG: Raw data as string: \(String(data: savedData, encoding: .utf8) ?? "unable to convert to string")")
+            // Failed to decode provider type
             // Default to Gemini with empty API key
             return .geminiDirect(apiKey: "")
         }
@@ -53,7 +57,7 @@ final class LLMService: GeminiServicing {
     }
     
     // Keep the existing processBatch implementation for backward compatibility
-    func processBatch(_ batchId: Int64, completion: @escaping (Result<[ActivityCard], Error>) -> Void) {
+    func processBatch(_ batchId: Int64, completion: @escaping (Result<ProcessedBatchResult, Error>) -> Void) {
         guard let provider = provider else {
             completion(.failure(NSError(domain: "LLMService", code: 1, userInfo: [NSLocalizedDescriptionKey: "No LLM provider configured. Please configure in settings."])))
             return
@@ -85,7 +89,7 @@ final class LLMService: GeminiServicing {
                 let composition = AVMutableComposition()
                 var compositionTime = CMTime.zero
                 
-                print("[DEBUG] Combining \(chunkFiles.count) video chunks")
+                // Combining video chunks
                 
                 // Create a single video track for all chunks
                 guard let compositionTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
@@ -99,7 +103,7 @@ final class LLMService: GeminiServicing {
                     let duration = try await asset.load(.duration)
                     let durationSeconds = CMTimeGetSeconds(duration)
                     
-                    print("[DEBUG] Chunk \(index): duration=\(durationSeconds)s, insertAt=\(CMTimeGetSeconds(compositionTime))s")
+                    // Processing chunk
                     
                     if let track = try await asset.loadTracks(withMediaType: .video).first {
                         try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: track, at: compositionTime)
@@ -109,7 +113,7 @@ final class LLMService: GeminiServicing {
                 }
                 
                 let totalDuration = CMTimeGetSeconds(compositionTime)
-                print("[DEBUG] Total composition duration: \(totalDuration) seconds (\(totalDuration/60) minutes)")
+                // Total composition duration calculated
                 
                 // Export combined video to temporary file
                 let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -130,7 +134,7 @@ final class LLMService: GeminiServicing {
                 // Load video data
                 let videoData = try Data(contentsOf: tempURL)
                 let mimeType = "video/mp4"
-                print("[DEBUG] Exported video size: \(videoData.count / 1024 / 1024) MB")
+                // Video exported successfully
                 
                 // Clean up temp file
                 defer {
@@ -145,7 +149,8 @@ final class LLMService: GeminiServicing {
                     videoData: videoData,
                     mimeType: mimeType,
                     prompt: "Transcribe this video", // Provider will use its own prompt
-                    batchStartTime: batchStartDate
+                    batchStartTime: batchStartDate,
+                    videoDuration: totalDuration
                 )
                 
                 // Save observations to database
@@ -160,7 +165,7 @@ final class LLMService: GeminiServicing {
                 // If no observations, mark batch as complete with no activities
                 guard !observations.isEmpty else {
                     StorageManager.shared.updateBatch(batchId, status: "analyzed")
-                    completion(.success([]))
+                    completion(.success(ProcessedBatchResult(cards: [], cardIds: [])))
                     return
                 }
                 
@@ -218,7 +223,7 @@ final class LLMService: GeminiServicing {
                 )
                 
                 // Replace old cards with new ones in the time range
-                StorageManager.shared.replaceTimelineCardsInRange(
+                let insertedCardIds = StorageManager.shared.replaceTimelineCardsInRange(
                     from: oneHourAgo,
                     to: currentTime,
                     with: cards.map { card in
@@ -257,7 +262,7 @@ final class LLMService: GeminiServicing {
                     UserDefaults.standard.set(extractedTerms, forKey: "extractedTaxonomy")
                 }
                 
-                completion(.success(cards))
+                completion(.success(ProcessedBatchResult(cards: cards, cardIds: insertedCardIds)))
                 
             } catch {
                 print("Error processing batch: \(error)")

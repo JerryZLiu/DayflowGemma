@@ -14,8 +14,10 @@ final class GeminiDirectProvider: LLMProvider {
         self.apiKey = apiKey
     }
     
-    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date) async throws -> (observations: [Observation], log: LLMCall) {
+    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date, videoDuration: TimeInterval) async throws -> (observations: [Observation], log: LLMCall) {
         let callStart = Date()
+        print("\n🚀 Starting Gemini observation generation at \(formatTime(callStart))")
+        print("📹 Video duration: \(String(format: "%.2f", videoDuration)) seconds (\(String(format: "%.1f", videoDuration/60)) minutes)")
         
         // First, save video data to a temporary file
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -24,10 +26,17 @@ final class GeminiDirectProvider: LLMProvider {
         
         let fileURI = try await uploadAndAwait(tempURL, mimeType: mimeType, key: apiKey).1
         
+        // Format duration for display
+        let durationMinutes = Int(videoDuration / 60)
+        let durationSeconds = Int(videoDuration.truncatingRemainder(dividingBy: 60))
+        let durationString = String(format: "%02d:%02d", durationMinutes, durationSeconds)
+        
         let finalTranscriptionPrompt = """
         # Video Transcription Prompt
 
         Your job is to transcribe someone's computer usage into a small number of meaningful activity segments.
+
+        ## CRITICAL: This video is exactly \(durationString) long. ALL timestamps MUST be within 00:00 to \(durationString).
 
         ## Golden Rule: Aim for 3-5 segments per 15-minute video (fewer is better than more)
 
@@ -155,9 +164,21 @@ final class GeminiDirectProvider: LLMProvider {
         let videoTranscripts = try parseTranscripts(response)
         
         // Convert video transcripts to observations with proper Unix timestamps
-        let observations = videoTranscripts.map { chunk in
+        // Validate and process observations
+        var hasValidationErrors = false
+        let observations = videoTranscripts.compactMap { chunk -> Observation? in
             let startSeconds = parseVideoTimestamp(chunk.startTimestamp)
             let endSeconds = parseVideoTimestamp(chunk.endTimestamp)
+            
+            // Validate timestamps are within video duration (with 2 minute tolerance)
+            let tolerance: TimeInterval = 120.0 // 2 minutes
+            if Double(startSeconds) < -tolerance || Double(endSeconds) > videoDuration + tolerance {
+                print("❌ VALIDATION ERROR: Observation timestamps exceed video duration!")
+                print("   Video duration: \(String(format: "%.2f", videoDuration))s")
+                print("   Observation: \(chunk.startTimestamp) - \(chunk.endTimestamp) (\(startSeconds)s - \(endSeconds)s)")
+                hasValidationErrors = true
+                return nil
+            }
             let startDate = batchStartTime.addingTimeInterval(TimeInterval(startSeconds))
             let endDate = batchStartTime.addingTimeInterval(TimeInterval(endSeconds))
             
@@ -180,6 +201,20 @@ final class GeminiDirectProvider: LLMProvider {
             )
         }
         
+        // If we had validation errors, throw to trigger retry
+        if hasValidationErrors {
+            throw NSError(domain: "GeminiProvider", code: 100, userInfo: [
+                NSLocalizedDescriptionKey: "Gemini generated observations with timestamps exceeding video duration. Video is \(durationString) long but observations extended beyond this."
+            ])
+        }
+        
+        // Ensure we have at least one observation
+        if observations.isEmpty {
+            throw NSError(domain: "GeminiProvider", code: 101, userInfo: [
+                NSLocalizedDescriptionKey: "No valid observations generated after filtering out invalid timestamps"
+            ])
+        }
+        
         let log = LLMCall(
             timestamp: callStart,
             latency: Date().timeIntervalSince(callStart),
@@ -187,33 +222,25 @@ final class GeminiDirectProvider: LLMProvider {
             output: response
         )
         
+        let duration = Date().timeIntervalSince(callStart)
+        print("✅ Gemini observation generation completed in \(String(format: "%.2f", duration)) seconds")
+        
         return (observations, log)
     }
     
     func generateActivityCards(observations: [Observation], context: ActivityGenerationContext) async throws -> (cards: [ActivityCard], log: LLMCall) {
         let callStart = Date()
+        print("\n🚀 Starting Gemini activity card generation at \(formatTime(callStart))")
         
         // Convert observations to human-readable format for the prompt
         let transcriptText = observations.map { obs in
             let startTime = formatTimestampForPrompt(obs.startTs)
             let endTime = formatTimestampForPrompt(obs.endTs)
             
-            print("\n🕐 Activity Card Generation - Timestamp Conversion:")
-            print("  Unix timestamps from DB: \(obs.startTs) - \(obs.endTs)")
-            print("  Converted to dates: \(Date(timeIntervalSince1970: TimeInterval(obs.startTs))) - \(Date(timeIntervalSince1970: TimeInterval(obs.endTs)))")
-            print("  Formatted for prompt: [\(startTime) - \(endTime)]")
-            print("  Observation: \(obs.observation)")
-            
             return "[" + startTime + " - " + endTime + "]: " + obs.observation
         }.joined(separator: "\n")
         
-        print("[DEBUG-GEMINI] Building transcript text from \(observations.count) observations")
-        print("[DEBUG-GEMINI] First 3 observations in prompt format:")
-        for (index, obs) in observations.prefix(3).enumerated() {
-            let startTime = formatTimestampForPrompt(obs.startTs)
-            let endTime = formatTimestampForPrompt(obs.endTs)
-            print("[DEBUG-GEMINI] Observation \(index): [\(startTime) - \(endTime)]: \(obs.observation.prefix(100))...")
-        }
+        // Building transcript text from observations
         
         print("transcript_text: \(transcriptText)")
         
@@ -319,13 +346,14 @@ final class GeminiDirectProvider: LLMProvider {
                 ]
         """
         
-        print(activityGenerationPrompt)
+        print("Previous cards: \(existingCardsString)")
+        print("New observations: \(transcriptText)")
         
         // Initial request
         var response = try await geminiCardsRequest(
             prompt: activityGenerationPrompt
         )
-        
+        print("Output: \(response)")
         var cards = try parseActivityCards(response)
         
         // Combined validation and retry loop
@@ -407,6 +435,9 @@ final class GeminiDirectProvider: LLMProvider {
             output: response
         )
         
+        let duration = Date().timeIntervalSince(callStart)
+        print("✅ Gemini activity card generation completed in \(String(format: "%.2f", duration)) seconds (including \(retryCount) retries)")
+        
         return (cards, log)
     }
     
@@ -417,10 +448,10 @@ final class GeminiDirectProvider: LLMProvider {
         let fileSize = fileData.count
         var uploadedFileURI: String? = nil
         
-        print("[DEBUG] Uploading file of size: \(fileSize / 1024 / 1024) MB")
+        // Removed debug print
         
         // Always use resumable upload
-        print("[DEBUG] Using resumable upload")
+        // Removed debug print
         uploadedFileURI = try await uploadResumable(data: fileData, mimeType: mimeType)
         
         guard let fileURI = uploadedFileURI else {
@@ -477,12 +508,12 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
         
         let (responseData, response) = try await URLSession.shared.data(for: request)
         
-        print("[DEBUG] Resumable upload init response status: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        // Removed debug print
         if let httpResponse = response as? HTTPURLResponse {
-            print("[DEBUG] Response headers: \(httpResponse.allHeaderFields)")
+            // Removed debug print
         }
         if let responseString = String(data: responseData, encoding: .utf8) {
-            print("[DEBUG] Response body: \(responseString)")
+            // Removed debug print
         }
         
         guard let httpResponse = response as? HTTPURLResponse,
@@ -573,7 +604,7 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 429 {
                     let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
                     let delay = TimeInterval(retryAfter ?? "60") ?? 60
-                    print("[DEBUG] Rate limited, retrying after \(delay) seconds...")
+                    // Rate limited, retrying...
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
@@ -596,14 +627,13 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 // If it's not the last attempt, wait before retrying
                 if attempt < maxRetries - 1 {
                     let backoffDelay = pow(2.0, Double(attempt)) * 5.0 // 5s, 10s, 20s
-                    print("[DEBUG] Gemini transcribe request failed (attempt \(attempt + 1)/\(maxRetries)): \(error.localizedDescription)")
-                    print("[DEBUG] Retrying in \(backoffDelay) seconds...")
+                    // Gemini transcribe request failed, retrying...
                     try await Task.sleep(nanoseconds: UInt64(backoffDelay * 1_000_000_000))
                 }
             }
         }
         
-        print("[DEBUG] Gemini transcribe request failed after \(maxRetries) attempts")
+        // Gemini transcribe request failed after max attempts
         throw lastError ?? NSError(domain: "GeminiError", code: 8, userInfo: [NSLocalizedDescriptionKey: "Request failed after \(maxRetries) attempts"])
     }
     
@@ -638,7 +668,7 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 ],
                 "required": ["startTimestamp", "endTimestamp", "category", "subcategory", "title", "summary", "detailedSummary"],
                 "propertyOrdering": ["startTimestamp", "endTimestamp", "category", "subcategory", "title", "summary", "detailedSummary", "distractions"]
-            ]   
+            ]
         ]
         
         let generationConfig: [String: Any] = [
@@ -674,7 +704,7 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 429 {
                     let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
                     let delay = TimeInterval(retryAfter ?? "60") ?? 60
-                    print("[DEBUG] Rate limited, retrying after \(delay) seconds...")
+                    // Rate limited, retrying...
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
@@ -697,14 +727,13 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                 // If it's not the last attempt, wait before retrying
                 if attempt < maxRetries - 1 {
                     let backoffDelay = pow(2.0, Double(attempt)) * 5.0 // 5s, 10s, 20s
-                    print("[DEBUG] Gemini cards request failed (attempt \(attempt + 1)/\(maxRetries)): \(error.localizedDescription)")
-                    print("[DEBUG] Retrying in \(backoffDelay) seconds...")
+                    // Gemini cards request failed, retrying...
                     try await Task.sleep(nanoseconds: UInt64(backoffDelay * 1_000_000_000))
                 }
             }
         }
         
-        print("[DEBUG] Gemini cards request failed after \(maxRetries) attempts")
+        // Gemini cards request failed after max attempts
         throw lastError ?? NSError(domain: "GeminiError", code: 10, userInfo: [NSLocalizedDescriptionKey: "Request failed after \(maxRetries) attempts"])
     }
     
@@ -737,8 +766,8 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
         // Convert to our ActivityCard format
         return geminiCards.map { geminiCard in
             ActivityCard(
-                startTime: geminiCard.startTimestamp,
-                endTime: geminiCard.endTimestamp,
+                   startTime: geminiCard.startTimestamp,
+                   endTime: geminiCard.endTimestamp,
                 category: geminiCard.category,
                 subcategory: geminiCard.subcategory,
                 title: geminiCard.title,
@@ -824,13 +853,18 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
         // Merge overlapping/adjacent ranges
         let mergedInputRanges = mergeOverlappingRanges(inputRanges)
         
-        // Extract time ranges from output cards
+        // Extract time ranges from output cards (Fix #1: Skip zero or negative duration cards)
         var outputRanges: [TimeRange] = []
         for card in newCards {
             let startMin = timeToMinutes(card.startTime)
             var endMin = timeToMinutes(card.endTime)
             if endMin < startMin {  // Handle day rollover
                 endMin += 24 * 60
+            }
+            // Skip zero or very short duration cards (less than 0.1 minutes = 6 seconds)
+            guard endMin - startMin >= 0.1 else {
+                print("⚠️ Skipping zero/short duration card: '\(card.title)' [\(card.startTime) - \(card.endTime)]")
+                continue
             }
             outputRanges.append(TimeRange(start: startMin, end: endMin))
         }
@@ -842,16 +876,20 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
         for inputRange in mergedInputRanges {
             // Check if this input range is covered by output ranges
             var coveredStart = inputRange.start
+            var safetyCounter = 10000  // Fix #3: Safety cap to prevent infinite loops
             
-            while coveredStart < inputRange.end {
+            while coveredStart < inputRange.end && safetyCounter > 0 {
+                safetyCounter -= 1
                 // Find an output range that covers this point
                 var foundCoverage = false
                 
                 for outputRange in outputRanges {
                     // Check if this output range covers the current point (with flexibility)
                     if outputRange.start - flexibility <= coveredStart && coveredStart <= outputRange.end + flexibility {
-                        // Move coveredStart to the end of this output range
-                        coveredStart = outputRange.end
+                        // Move coveredStart to the end of this output range (Fix #2: Force progress)
+                        let newCoveredStart = outputRange.end
+                        // Ensure we make at least minimal progress (0.01 minutes = 0.6 seconds)
+                        coveredStart = max(coveredStart + 0.01, newCoveredStart)
                         foundCoverage = true
                         break
                     }
@@ -876,6 +914,11 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                         break
                     }
                 }
+            }
+            
+            // Check if safety counter was exhausted
+            if safetyCounter == 0 {
+                return (false, "Time coverage validation loop exceeded safety limit - possible infinite loop detected")
             }
         }
         
@@ -935,7 +978,7 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
                     
                     durationMinutes = adjustedEndDate.timeIntervalSince(startDate) / 60.0
                 } else {
-                    print("[DEBUG] Failed to parse clock times: \(startTime) - \(endTime)")
+                    // Failed to parse clock times
                     durationMinutes = 0
                 }
             } else {
@@ -957,12 +1000,40 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
     private func minutesToTimeString(_ minutes: Double) -> String {
         let hours = (Int(minutes) / 60) % 24  // Handle > 24 hours
         let mins = Int(minutes) % 60
-        let period = hours < 12 ? "AM" : "PM"
+        let period = hours < 12 ? "AM" : "PM"   
         var displayHour = hours % 12
         if displayHour == 0 {
             displayHour = 12
         }
         return String(format: "%d:%02d %@", displayHour, mins, period)
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+    
+    private func parseVideoTimestamp(_ timestamp: String) -> Int {
+        // Parse timestamps like "00:00", "01:30", "00:00:00", "01:47:28"
+        let components = timestamp.components(separatedBy: ":")
+        
+        if components.count == 2 {
+            // MM:SS format
+            let minutes = Int(components[0]) ?? 0
+            let seconds = Int(components[1]) ?? 0
+            return minutes * 60 + seconds
+        } else if components.count == 3 {
+            // HH:MM:SS format
+            let hours = Int(components[0]) ?? 0
+            let minutes = Int(components[1]) ?? 0
+            let seconds = Int(components[2]) ?? 0
+            return hours * 3600 + minutes * 60 + seconds
+        } else {
+            // Invalid format, return 0
+            print("Warning: Invalid video timestamp format: \(timestamp)")
+            return 0
+        }
     }
 }
 

@@ -33,6 +33,7 @@ struct TimelineView: View {
     @State private var showReprocessConfirmation = false
     @State private var isReprocessing = false
     @State private var reprocessingProgress = ""
+    @State private var showBatchSelection = false
     
     private let storageManager = StorageManager.shared
     private let analysisManager = AnalysisManager.shared
@@ -81,11 +82,23 @@ struct TimelineView: View {
         }
         .alert("Rerun Analysis", isPresented: $showReprocessConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Rerun", role: .destructive) {
+            Button("Select Batches") {
+                showBatchSelection = true
+            }
+            Button("Rerun All", role: .destructive) {
                 rerunAnalysis()
             }
         } message: {
-            Text("This will delete all timeline cards and observations for \(formatDateForDisplay(selectedDate)), then re-transcribe and re-analyze all video recordings.\n\nThis process may take several minutes and will use LLM API credits.")
+            Text("This will delete timeline cards and observations for \(formatDateForDisplay(selectedDate)), then re-transcribe and re-analyze video recordings.\n\nYou can choose to rerun all batches or select specific ones.")
+        }
+        .sheet(isPresented: $showBatchSelection) {
+            BatchSelectionView(
+                day: formatDateForStorage(getLogicalDate()),
+                analysisManager: analysisManager,
+                onCompletion: {
+                    loadActivities()
+                }
+            )
         }
         .overlay {
             if isReprocessing {
@@ -102,11 +115,14 @@ struct TimelineView: View {
                             .font(.title2)
                             .fontWeight(.semibold)
                         
-                        Text(reprocessingProgress)
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 300)
+                        ScrollView {
+                            Text(reprocessingProgress)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: 400, alignment: .leading)
+                        }
+                        .frame(maxHeight: 300)
                     }
                     .padding(40)
                     .background(Color(NSColor.windowBackgroundColor))
@@ -205,10 +221,26 @@ struct TimelineView: View {
         let calendar = Calendar.current
         let timeComponents = calendar.dateComponents([.hour, .minute], from: time)
         
-        return calendar.date(bySettingHour: timeComponents.hour ?? 0,
-                           minute: timeComponents.minute ?? 0,
-                           second: 0,
-                           of: baseDate)
+        guard let hour = timeComponents.hour,
+              let minute = timeComponents.minute else { return nil }
+        
+        // Create the date with the parsed time
+        var result = calendar.date(bySettingHour: hour,
+                                  minute: minute,
+                                  second: 0,
+                                  of: baseDate) ?? baseDate
+        
+        // Handle day boundary - if the hour is less than 4 AM, it might belong to the next day
+        if hour < 4 {
+            // Check if we should add a day
+            let baseDateHour = calendar.component(.hour, from: baseDate)
+            if baseDateHour >= 4 {
+                // Base date is after 4 AM but parsed time is before 4 AM, so add a day
+                result = calendar.date(byAdding: .day, value: 1, to: result) ?? result
+            }
+        }
+        
+        return result
     }
     
     private func loadVideoThumbnail(from urlString: String?) -> NSImage? {
@@ -245,6 +277,24 @@ struct TimelineView: View {
         let displayDate = hour < 4 ? calendar.date(byAdding: .day, value: -1, to: date) ?? date : date
         
         return formatter.string(from: displayDate)
+    }
+    
+    private func getLogicalDate() -> Date {
+        var logicalDate = selectedDate
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: selectedDate)
+        
+        if hour < 4 {
+            logicalDate = calendar.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
+        }
+        
+        return logicalDate
+    }
+    
+    private func formatDateForStorage(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
     
     private func rerunAnalysis() {
@@ -441,6 +491,11 @@ struct TimelineActivityCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack(spacing: 12) {
+                // Time range
+                Text(formatTimeRange(start: activity.startTime, end: activity.endTime))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(.black.opacity(0.6))
+                
                 // Category badge
                 Text(activity.category)
                     .font(.system(size: 12, weight: .medium))
@@ -525,6 +580,17 @@ struct TimelineActivityCard: View {
             .opacity(isExpanded ? 0 : 1)
             .animation(.easeInOut, value: isExpanded)
         )
+    }
+    
+    private func formatTimeRange(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        let startStr = formatter.string(from: start)
+        let endStr = formatter.string(from: end)
+        
+        return "\(startStr) - \(endStr)"
     }
 }
 

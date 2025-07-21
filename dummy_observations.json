@@ -1,0 +1,98 @@
+[
+  {
+    "start_ts": 1753621800,
+    "end_ts": 1753622100,
+    "observation": "User is actively coding in VS Code, working on a React component for a dashboard feature. They're writing useState hooks and implementing form validation logic.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753622100,
+    "end_ts": 1753622400,
+    "observation": "User continues coding the React dashboard, now debugging an issue with state updates. Briefly switches to Stack Overflow to look up useEffect dependencies.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753622400,
+    "end_ts": 1753622700,
+    "observation": "User is refactoring the component structure, extracting smaller components. Takes a quick break to check Slack messages but returns to coding within a minute.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753622700,
+    "end_ts": 1753623000,
+    "observation": "User runs npm test to check unit tests, fixes a failing test. Briefly checks Twitter/X but quickly returns to reviewing test output.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753623000,
+    "end_ts": 1753623300,
+    "observation": "User implements API integration for the dashboard, writing async functions. Opens Postman to test API endpoints.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753623300,
+    "end_ts": 1753623600,
+    "observation": "User continues with API integration, handling error cases and loading states. Quickly checks email notifications but stays focused on code.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753623600,
+    "end_ts": 1753623900,
+    "observation": "User switches completely to YouTube and starts watching a compilation of funny cat videos. No coding activity visible.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753623900,
+    "end_ts": 1753624200,
+    "observation": "User continues watching cat videos on YouTube, clicking through several recommended videos about cats doing silly things.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753624200,
+    "end_ts": 1753624500,
+    "observation": "User is still on YouTube watching pet videos, now including some dog videos. Likes and comments on a few videos.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753624500,
+    "end_ts": 1753624800,
+    "observation": "User returns to VS Code and resumes coding. Reviews the API integration code and starts adding error handling improvements.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753624800,
+    "end_ts": 1753625100,
+    "observation": "User commits code changes with git, writes a detailed commit message about the dashboard feature. Checks GitHub to review pull request comments.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  },
+  {
+    "start_ts": 1753625100,
+    "end_ts": 1753625400,
+    "observation": "User addresses PR feedback, making requested changes to the code. Briefly distracted by a Slack notification but quickly returns to code review.",
+    "metadata": {
+      "model": "dummy_data"
+    }
+  }
+]

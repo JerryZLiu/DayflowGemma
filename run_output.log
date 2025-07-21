@@ -1,0 +1,45 @@
+2025-07-27 22:34:30,508 - __main__ - INFO - Using Ollama at http://localhost:1234 (health check skipped)
+2025-07-27 22:34:30,508 - __main__ - INFO - Found 1 videos to process
+2025-07-27 22:34:30,508 - __main__ - INFO - 
+Processing video 1/1: /Users/jerry/Downloads/batch498.mp4
+2025-07-27 22:34:30,508 - __main__ - INFO - Starting processing for: batch498.mp4
+2025-07-27 22:34:30,758 - __main__ - INFO - Video duration: 14:19
+2025-07-27 22:34:30,758 - __main__ - INFO - Stage 1: Extracting frames...
+2025-07-27 22:34:32,377 - __main__ - INFO - Extracted 29 frames
+2025-07-27 22:34:32,377 - __main__ - INFO - Stage 2: Analyzing frames...
+2025-07-27 22:34:32,377 - __main__ - INFO - Analyzing frame 1/29 at 00:00
+2025-07-27 22:34:34,347 - __main__ - INFO - Analyzing frame 2/29 at 00:30
+2025-07-27 22:34:36,667 - __main__ - INFO - Analyzing frame 3/29 at 01:00
+2025-07-27 22:34:39,253 - __main__ - INFO - Analyzing frame 4/29 at 01:30
+2025-07-27 22:34:41,663 - __main__ - INFO - Analyzing frame 5/29 at 02:00
+2025-07-27 22:34:43,918 - __main__ - INFO - Analyzing frame 6/29 at 02:30
+2025-07-27 22:34:45,684 - __main__ - INFO - Analyzing frame 7/29 at 03:00
+2025-07-27 22:34:47,644 - __main__ - INFO - Analyzing frame 8/29 at 03:30
+2025-07-27 22:34:50,875 - __main__ - INFO - Analyzing frame 9/29 at 04:00
+2025-07-27 22:34:53,777 - __main__ - INFO - Analyzing frame 10/29 at 04:30
+2025-07-27 22:34:55,831 - __main__ - INFO - Analyzing frame 11/29 at 05:00
+2025-07-27 22:34:57,715 - __main__ - INFO - Analyzing frame 12/29 at 05:30
+2025-07-27 22:34:59,729 - __main__ - INFO - Analyzing frame 13/29 at 06:00
+2025-07-27 22:35:01,822 - __main__ - INFO - Analyzing frame 14/29 at 06:30
+2025-07-27 22:35:04,632 - __main__ - INFO - Analyzing frame 15/29 at 07:00
+2025-07-27 22:35:06,491 - __main__ - INFO - Analyzing frame 16/29 at 07:30
+2025-07-27 22:35:08,582 - __main__ - INFO - Analyzing frame 17/29 at 08:00
+2025-07-27 22:35:10,865 - __main__ - INFO - Analyzing frame 18/29 at 08:30
+2025-07-27 22:35:13,690 - __main__ - INFO - Analyzing frame 19/29 at 09:00
+2025-07-27 22:35:16,468 - __main__ - INFO - Analyzing frame 20/29 at 09:30
+2025-07-27 22:35:19,348 - __main__ - INFO - Analyzing frame 21/29 at 10:00
+2025-07-27 22:35:22,280 - __main__ - INFO - Analyzing frame 22/29 at 10:30
+2025-07-27 22:35:25,085 - __main__ - INFO - Analyzing frame 23/29 at 11:00
+2025-07-27 22:35:28,040 - __main__ - INFO - Analyzing frame 24/29 at 11:30
+2025-07-27 22:35:30,434 - __main__ - INFO - Analyzing frame 25/29 at 12:00
+2025-07-27 22:35:32,763 - __main__ - INFO - Analyzing frame 26/29 at 12:30
+2025-07-27 22:35:35,825 - __main__ - INFO - Analyzing frame 27/29 at 13:00
+2025-07-27 22:35:38,461 - __main__ - INFO - Analyzing frame 28/29 at 13:30
+2025-07-27 22:35:40,999 - __main__ - INFO - Analyzing frame 29/29 at 14:00
+2025-07-27 22:35:43,499 - __main__ - INFO - Stage 3: Merging frame descriptions...
+2025-07-27 22:36:13,702 - __main__ - INFO - Created 22 observations
+2025-07-27 22:36:13,704 - __main__ - INFO - Stage 4: Generating activity cards...
+2025-07-27 22:36:13,704 - __main__ - INFO - Activity card generation is currently a stub
+2025-07-27 22:36:13,704 - __main__ - INFO - Generated 22 activity cards
+2025-07-27 22:36:13,706 - __main__ - INFO - Total processing time: 103.20 seconds
+2025-07-27 22:36:13,706 - __main__ - INFO - Processing complete!

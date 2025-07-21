@@ -1,0 +1,170 @@
+[
+  {
+    "start_ts": 1753621800,
+    "end_ts": 1753621860,
+    "observation": "User opens VS Code to work on Python script for data analysis. Looking at pandas DataFrame operations.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753621860,
+    "end_ts": 1753621920,
+    "observation": "User gets Slack notification, switches to Slack and responds to teammate about deployment schedule.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753621920,
+    "end_ts": 1753622100,
+    "observation": "Back to VS Code, writing data cleaning functions. Adds try/except blocks for error handling.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622100,
+    "end_ts": 1753622160,
+    "observation": "Switches to Chrome, checks Twitter/X quickly. Scrolls through feed for a minute.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622160,
+    "end_ts": 1753622340,
+    "observation": "Returns to coding, runs Python script but gets ImportError. Googles the error message.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622340,
+    "end_ts": 1753622400,
+    "observation": "On Stack Overflow reading about the import issue. Finds solution about package versions.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622400,
+    "end_ts": 1753622580,
+    "observation": "Back in terminal, runs pip install to fix dependency. While waiting, checks Reddit r/programming.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622580,
+    "end_ts": 1753622640,
+    "observation": "Package installed. Returns to VS Code and successfully runs the script. Data loads correctly.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622640,
+    "end_ts": 1753622880,
+    "observation": "Writing matplotlib visualization code. Creates bar charts and scatter plots for the analysis.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622880,
+    "end_ts": 1753623040,
+    "observation": "Phone buzzes, picks it up and checks Instagram. Scrolls through stories and reels.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623040,
+    "end_ts": 1753623100,
+    "observation": "Email notification pops up. Switches to Gmail, reads email about meeting tomorrow.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623100,
+    "end_ts": 1753623160,
+    "observation": "Opens Google Calendar to check schedule. Adds the meeting to calendar.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623160,
+    "end_ts": 1753623340,
+    "observation": "Back to VS Code. Adjusts plot styling, changes colors and adds labels to axes.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623340,
+    "end_ts": 1753623400,
+    "observation": "Saves work and commits to git. Writes commit message 'Add data visualization module'.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623400,
+    "end_ts": 1753623700,
+    "observation": "Takes a break. Opens YouTube and watches a 5-minute tech review video about new laptop.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623700,
+    "end_ts": 1753623760,
+    "observation": "Video ends, YouTube autoplays a cooking video. Watches for a minute before realizing.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623760,
+    "end_ts": 1753623820,
+    "observation": "Closes YouTube. Opens Spotify to put on focus music playlist.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623820,
+    "end_ts": 1753624000,
+    "observation": "Returns to VS Code. Starts working on unit tests for the data cleaning functions.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624000,
+    "end_ts": 1753624180,
+    "observation": "Writing pytest test cases. Sets up test fixtures with sample data.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624180,
+    "end_ts": 1753624240,
+    "observation": "Slack message comes in. Team member asking about code review. Responds will do it after lunch.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624240,
+    "end_ts": 1753624300,
+    "observation": "Stays in Slack, notices funny meme in #random channel. Reacts with emoji and shares own meme.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624300,
+    "end_ts": 1753624600,
+    "observation": "Back to testing. Runs pytest, 2 tests fail. Debugs the test assertions and fixes edge cases.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624600,
+    "end_ts": 1753624660,
+    "observation": "All tests pass. Commits test file to git with message 'Add unit tests for data cleaning'.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624660,
+    "end_ts": 1753624720,
+    "observation": "Opens GitHub in browser to create pull request. Writes PR description.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624720,
+    "end_ts": 1753624900,
+    "observation": "While PR builds, switches to Twitter/X. Reads thread about new Python features in 3.13.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624900,
+    "end_ts": 1753625200,
+    "observation": "Gets interested in Python discussion, opens linked blog post about async improvements. Reads article.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753625200,
+    "end_ts": 1753625260,
+    "observation": "GitHub notification - PR checks passed. Goes back to GitHub to merge the PR.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753625260,
+    "end_ts": 1753625400,
+    "observation": "PR merged. Starts looking at next Jira ticket about implementing caching for API calls.",
+    "metadata": {"model": "dummy_data"}
+  }
+]

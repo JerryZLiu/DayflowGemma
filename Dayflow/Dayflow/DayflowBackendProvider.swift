@@ -14,7 +14,7 @@ final class DayflowBackendProvider: LLMProvider {
         self.endpoint = endpoint
     }
     
-    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date) async throws -> (observations: [Observation], log: LLMCall) {
+    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date, videoDuration: TimeInterval) async throws -> (observations: [Observation], log: LLMCall) {
         fatalError("DayflowBackendProvider not implemented yet")
     }
     

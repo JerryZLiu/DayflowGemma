@@ -1,0 +1,44 @@
+2025-07-28 16:43:44,497 - INFO - Starting timeline strategy evaluation
+2025-07-28 16:43:44,498 - INFO - Loaded 81 observations from today
+2025-07-28 16:43:44,498 - INFO - 
+Testing configuration: 80% merge, no cap
+2025-07-28 16:43:44,502 - INFO -   Generated 4 cards
+2025-07-28 16:43:44,502 - INFO -   Average duration: 115.1 min
+2025-07-28 16:43:44,502 - INFO -   Average observations per card: 20.2
+2025-07-28 16:43:44,502 - INFO - 
+Testing configuration: 85% merge, no cap
+2025-07-28 16:43:44,503 - INFO -   Generated 4 cards
+2025-07-28 16:43:44,503 - INFO -   Average duration: 115.1 min
+2025-07-28 16:43:44,503 - INFO -   Average observations per card: 20.2
+2025-07-28 16:43:44,503 - INFO - 
+Testing configuration: 90% merge, no cap
+2025-07-28 16:43:44,504 - INFO -   Generated 4 cards
+2025-07-28 16:43:44,504 - INFO -   Average duration: 115.1 min
+2025-07-28 16:43:44,504 - INFO -   Average observations per card: 20.2
+2025-07-28 16:43:44,504 - INFO - 
+Testing configuration: 80% merge, 25min cap
+2025-07-28 16:43:44,505 - INFO -   Generated 22 cards
+2025-07-28 16:43:44,506 - INFO -   Average duration: 20.5 min
+2025-07-28 16:43:44,506 - INFO -   Average observations per card: 3.7
+2025-07-28 16:43:44,506 - INFO - 
+Testing configuration: 85% merge, 25min cap
+2025-07-28 16:43:44,507 - INFO -   Generated 22 cards
+2025-07-28 16:43:44,507 - INFO -   Average duration: 20.5 min
+2025-07-28 16:43:44,507 - INFO -   Average observations per card: 3.7
+2025-07-28 16:43:44,507 - INFO - 
+Testing configuration: 90% merge, 25min cap
+2025-07-28 16:43:44,508 - INFO -   Generated 22 cards
+2025-07-28 16:43:44,508 - INFO -   Average duration: 20.5 min
+2025-07-28 16:43:44,508 - INFO -   Average observations per card: 3.7
+2025-07-28 16:43:44,508 - INFO - 
+Testing configuration: 85% merge, 20min cap
+2025-07-28 16:43:44,509 - INFO -   Generated 30 cards
+2025-07-28 16:43:44,509 - INFO -   Average duration: 15.2 min
+2025-07-28 16:43:44,509 - INFO -   Average observations per card: 2.7
+2025-07-28 16:43:44,509 - INFO - 
+Testing configuration: 85% merge, 30min cap
+2025-07-28 16:43:44,511 - INFO -   Generated 17 cards
+2025-07-28 16:43:44,511 - INFO -   Average duration: 26.6 min
+2025-07-28 16:43:44,511 - INFO -   Average observations per card: 4.8
+2025-07-28 16:43:44,514 - INFO - 
+Evaluation complete! Results saved to timeline_evaluation_results.json

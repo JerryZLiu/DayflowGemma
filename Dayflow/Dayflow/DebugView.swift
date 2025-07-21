@@ -120,8 +120,8 @@ struct DebugView: View {
             DispatchQueue.main.async {
                 self.isProcessing = false
                 switch result {
-                case .success(let cards):
-                    print("Successfully reprocessed batch \(batchId). Found \(cards.count) cards.")
+                case .success(let result):
+                    print("Successfully reprocessed batch \(batchId). Found \(result.cards.count) cards.")
                 case .failure(let error):
                     print("Failed to reprocess batch \(batchId): \(error.localizedDescription)")
                 }

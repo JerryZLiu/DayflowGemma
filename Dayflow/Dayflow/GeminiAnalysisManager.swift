@@ -18,6 +18,7 @@ protocol AnalysisManaging {
     func stopAnalysisJob()
     func triggerAnalysisNow()
     func reprocessDay(_ day: String, progressHandler: @escaping (String) -> Void, completion: @escaping (Result<Void, Error>) -> Void)
+    func reprocessSpecificBatches(_ batchIds: [Int64], progressHandler: @escaping (String) -> Void, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 // MARK: – Manager -----------------------------------------------------------
@@ -79,6 +80,9 @@ final class AnalysisManager: AnalysisManaging {
                 return 
             }
             
+            let overallStartTime = Date()
+            var batchTimings: [(batchId: Int64, duration: TimeInterval)] = []
+            
             DispatchQueue.main.async { progressHandler("Preparing to reprocess day \(day)...") }
             
             // 1. Delete existing timeline cards and get video paths to clean up
@@ -117,11 +121,14 @@ final class AnalysisManager: AnalysisManaging {
             var processedCount = 0
             var hasError = false
             
-            for batchId in batchIds {
+            for (index, batchId) in batchIds.enumerated() {
                 if hasError { break }
                 
+                let batchStartTime = Date()
+                let elapsedTotal = Date().timeIntervalSince(overallStartTime)
+                
                 DispatchQueue.main.async { 
-                    progressHandler("Processing batch \(processedCount + 1) of \(batchIds.count)...")
+                    progressHandler("Processing batch \(index + 1) of \(batchIds.count)... (Total elapsed: \(self.formatDuration(elapsedTotal)))")
                 }
                 
                 // Use a semaphore to wait for each batch to complete
@@ -140,10 +147,20 @@ final class AnalysisManager: AnalysisManaging {
                         case "completed", "analyzed":
                             isCompleted = true
                             processedCount += 1
+                            let batchDuration = Date().timeIntervalSince(batchStartTime)
+                            batchTimings.append((batchId: batchId, duration: batchDuration))
+                            DispatchQueue.main.async {
+                                progressHandler("✓ Batch \(index + 1) completed in \(self.formatDuration(batchDuration))")
+                            }
                         case "failed", "failed_empty", "skipped_short":
                             // These are acceptable end states
                             isCompleted = true
                             processedCount += 1
+                            let batchDuration = Date().timeIntervalSince(batchStartTime)
+                            batchTimings.append((batchId: batchId, duration: batchDuration))
+                            DispatchQueue.main.async {
+                                progressHandler("⚠️ Batch \(index + 1) ended with status '\(batch.status)' after \(self.formatDuration(batchDuration))")
+                            }
                         case "processing":
                             // Still processing, continue waiting
                             break
@@ -155,15 +172,149 @@ final class AnalysisManager: AnalysisManaging {
                 }
             }
             
+            let totalDuration = Date().timeIntervalSince(overallStartTime)
+            
             DispatchQueue.main.async {
+                // Build summary with timing stats
+                var summary = "\n📊 Reprocessing Summary:\n"
+                summary += "Total batches: \(batchIds.count)\n"
+                summary += "Processed: \(processedCount)\n"
+                summary += "Total time: \(self.formatDuration(totalDuration))\n"
+                
+                if !batchTimings.isEmpty {
+                    summary += "\nBatch timings:\n"
+                    for (index, timing) in batchTimings.enumerated() {
+                        summary += "  Batch \(index + 1): \(self.formatDuration(timing.duration))\n"
+                    }
+                    
+                    let avgTime = batchTimings.map { $0.duration }.reduce(0, +) / Double(batchTimings.count)
+                    summary += "\nAverage time per batch: \(self.formatDuration(avgTime))"
+                }
+                
+                progressHandler(summary)
+                
                 if hasError {
-                    progressHandler("Reprocessing failed")
                     completion(.failure(NSError(domain: "AnalysisManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to reprocess some batches"])))
                 } else {
-                    progressHandler("Successfully reprocessed \(processedCount) batches")
                     completion(.success(()))
                 }
             }
+        }
+    }
+    
+    func reprocessSpecificBatches(_ batchIds: [Int64], progressHandler: @escaping (String) -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else { 
+                completion(.failure(NSError(domain: "AnalysisManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manager deallocated"])))
+                return 
+            }
+            
+            let overallStartTime = Date()
+            var batchTimings: [(batchId: Int64, duration: TimeInterval)] = []
+            
+            DispatchQueue.main.async { progressHandler("Preparing to reprocess \(batchIds.count) selected batches...") }
+            
+            // Delete all timeline cards for the day (since they can be merged across batches)
+            DispatchQueue.main.async { progressHandler("Deleting existing timeline cards for the day...") }
+            
+            // Get the day string from the first batch
+            let allBatches = self.store.allBatches()
+            guard let firstBatch = allBatches.first(where: { batchIds.contains($0.id) }) else {
+                completion(.failure(NSError(domain: "AnalysisManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not find batch information"])))
+                return
+            }
+            
+            // Convert timestamp to day string
+            let date = Date(timeIntervalSince1970: TimeInterval(firstBatch.start))
+            let calendar = Calendar.current
+            let hour = calendar.component(.hour, from: date)
+            let logicalDate = hour < 4 ? calendar.date(byAdding: .day, value: -1, to: date) ?? date : date
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            let dayString = formatter.string(from: logicalDate)
+            
+            let videoPaths = self.store.deleteTimelineCards(forDay: dayString)
+            
+            // Delete observations
+            self.store.deleteObservations(forBatchIds: batchIds)
+            
+            // Delete video files
+            for path in videoPaths {
+                if let url = URL(string: path) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            
+            // Reset batch statuses
+            
+            DispatchQueue.main.async { progressHandler("Processing \(batchIds.count) batches...") }
+            
+            // Process batches
+            var processedCount = 0
+            var hasError = false
+            
+            for (index, batchId) in batchIds.enumerated() {
+                if hasError { break }
+                
+                let batchStartTime = Date()
+                let elapsedTotal = Date().timeIntervalSince(overallStartTime)
+                
+                DispatchQueue.main.async { 
+                    progressHandler("Processing batch \(index + 1) of \(batchIds.count)... (Total elapsed: \(self.formatDuration(elapsedTotal)))")
+                }
+                
+                self.queueGeminiRequest(batchId: batchId)
+                
+                // Wait for batch to complete (check status periodically)
+                var isCompleted = false
+                while !isCompleted && !hasError {
+                    Thread.sleep(forTimeInterval: 2.0) // Check every 2 seconds
+                    
+                    let allBatches = self.store.allBatches()
+                    if let batch = allBatches.first(where: { $0.id == batchId }) {
+                        switch batch.status {
+                        case "completed", "analyzed":
+                            isCompleted = true
+                            processedCount += 1
+                            let batchDuration = Date().timeIntervalSince(batchStartTime)
+                            batchTimings.append((batchId: batchId, duration: batchDuration))
+                            DispatchQueue.main.async {
+                                progressHandler("✓ Batch \(index + 1) completed in \(self.formatDuration(batchDuration))")
+                            }
+                        case "failed", "failed_empty", "skipped_short":
+                            // These are acceptable end states
+                            isCompleted = true
+                            processedCount += 1
+                            let batchDuration = Date().timeIntervalSince(batchStartTime)
+                            batchTimings.append((batchId: batchId, duration: batchDuration))
+                            DispatchQueue.main.async {
+                                progressHandler("⚠️ Batch \(index + 1) ended with status '\(batch.status)' after \(self.formatDuration(batchDuration))")
+                            }
+                        case "processing":
+                            // Still processing, continue waiting
+                            break
+                        default:
+                            // Unexpected status, but continue
+                            break
+                        }
+                    }
+                }
+            }
+            
+            // Summary
+            let totalDuration = Date().timeIntervalSince(overallStartTime)
+            let avgDuration = batchTimings.isEmpty ? 0 : batchTimings.reduce(0) { $0 + $1.duration } / Double(batchTimings.count)
+            
+            DispatchQueue.main.async {
+                progressHandler("""
+                ✅ Reprocessing complete!
+                • Processed: \(processedCount) of \(batchIds.count) batches
+                • Total time: \(self.formatDuration(totalDuration))
+                • Average time per batch: \(self.formatDuration(avgDuration))
+                """)
+            }
+            
+            completion(.success(()))
         }
     }
 
@@ -220,7 +371,7 @@ final class AnalysisManager: AnalysisManaging {
             URL(fileURLWithPath: chunk.fileUrl)
         }
 
-        llmService.processBatch(batchId) { [weak self] (result: Result<[ActivityCard], Error>) in
+        llmService.processBatch(batchId) { [weak self] (result: Result<ProcessedBatchResult, Error>) in
             guard let self else { return }
 
             let now = Date()
@@ -229,8 +380,21 @@ final class AnalysisManager: AnalysisManaging {
             print("Processing batch \(batchId) for logical day: \(currentLogicalDayString)")
 
             switch result {
-            case .success(let activityCards):
+            case .success(let processedResult):
+                let activityCards = processedResult.cards
+                let cardIds = processedResult.cardIds
                 print("LLM succeeded for Batch \(batchId). Processing \(activityCards.count) activity cards for day \(currentLogicalDayString).")
+                
+                // Debug: Check for duplicate cards from LLM
+                print("\n🔍 DEBUG: Checking for duplicate cards from LLM:")
+                for (i, card1) in activityCards.enumerated() {
+                    for (j, card2) in activityCards.enumerated() where j > i {
+                        if card1.startTime == card2.startTime && card1.endTime == card2.endTime && card1.title == card2.title {
+                            print("⚠️ DEBUG: Found duplicate cards at indices \(i) and \(j): '\(card1.title)' [\(card1.startTime) - \(card1.endTime)]")
+                        }
+                    }
+                }
+                print("✅ DEBUG: Duplicate check complete\n")
                 
                 guard let firstChunk = chunksInBatch.first else {
                     print("Error: No chunks found for batch \(batchId) during timestamp conversion")
@@ -271,10 +435,19 @@ final class AnalysisManager: AnalysisManaging {
                             print("Warning: No chunk file URLs to process for video summaries for batch \(batchId).")
                         }
 
-                        for activityCard in activityCards {
+                        print("\n🔍 DEBUG: Processing \(activityCards.count) activity cards from LLM")
+                        for (cardIndex, activityCard) in activityCards.enumerated() {
+                            print("📝 DEBUG: Processing card \(cardIndex + 1)/\(activityCards.count): '\(activityCard.title)' [\(activityCard.startTime) - \(activityCard.endTime)]")
                             var activitySpecificSummaryPath: String? = nil
                             var processedDistractionInfos: [ProcessedDistractionInfo] = []
-                            var currentDbCardId: Int64? = nil
+                            
+                            // Get the corresponding card ID from the array
+                            guard cardIndex < cardIds.count else {
+                                print("Error: Card index \(cardIndex) out of bounds for cardIds array. Skipping card.")
+                                continue
+                            }
+                            let currentDbCardId = cardIds[cardIndex]
+                            print("🔄 DEBUG: Using existing card ID: \(currentDbCardId) for '\(activityCard.title)'")
 
                             // Use the clock timestamps directly from the LLM
                             let finalStartTimestamp = activityCard.startTime
@@ -290,26 +463,12 @@ final class AnalysisManager: AnalysisManaging {
                             let videoStartInterval = actualStartDate.timeIntervalSince(firstChunkStartDate)
                             let videoEndInterval = actualEndDate.timeIntervalSince(firstChunkStartDate)
 
-                            // 1. Create and save TimelineCardShell to get its DB ID
-                            let cardShell = TimelineCardShell(
-                                startTimestamp: finalStartTimestamp, // Use calculated timestamp
-                                endTimestamp: finalEndTimestamp,   // Use calculated timestamp
-                                category: activityCard.category,
-                                subcategory: activityCard.subcategory,
-                                title: activityCard.title,
-                                summary: activityCard.summary,
-                                detailedSummary: activityCard.detailedSummary,
-                                day: currentLogicalDayString,
-                                distractions: activityCard.distractions
-                            )
-                            
-                            currentDbCardId = self.store.saveTimelineCardShell(batchId: batchId, card: cardShell)
-
-                            if let dbId = currentDbCardId {
-                                print("Saved TimelineCard shell for '\(activityCard.title)' with DB ID: \(dbId) (Timestamps: \(finalStartTimestamp) - \(finalEndTimestamp))")
+                            // Card is already saved by LLMService, just use the ID
+                            let dbId = currentDbCardId
+                            print("✅ DEBUG: Using existing TimelineCard ID: \(dbId) for '\(activityCard.title)' (Timestamps: \(finalStartTimestamp) - \(finalEndTimestamp))")
                                 
-                                // Video processing (cardStartInterval and cardEndInterval are already parsed above)
-                                if let fullBatchVideo = mainBatchVideoURL {
+                            // Video processing (cardStartInterval and cardEndInterval are already parsed above)
+                            if let fullBatchVideo = mainBatchVideoURL {
                                     let cardDuration = videoEndInterval - videoStartInterval // Use already parsed intervals
                                     if cardDuration > 0 {
                                         print("Processing summary for ActivityCard DB ID: \(dbId) ('\(activityCard.title)')")
@@ -339,14 +498,9 @@ final class AnalysisManager: AnalysisManaging {
                                         print("Warning: ActivityCard '\(activityCard.title)' (DB ID: \(dbId)) has non-positive duration based on parsed intervals. Skipping summary generation.")
                                         activitySpecificSummaryPath = nil
                                     }
-                                } else {
-                                    print("Warning: No main batch video. Cannot generate summary for ActivityCard '\(activityCard.title)' (DB ID: \(dbId))")
-                                    activitySpecificSummaryPath = nil
-                                }
                             } else {
-                                print("Error: Failed to save TimelineCard shell for '\(activityCard.title)'. Cannot generate video summary or save full card.")
-                                // Skip this card if shell couldn't be saved, as we need the ID
-                                continue
+                                print("Warning: No main batch video. Cannot generate summary for ActivityCard '\(activityCard.title)' (DB ID: \(dbId))")
+                                activitySpecificSummaryPath = nil
                             }
 
                             // 4. Process distractions for this activity card (using the full batch video as source)
@@ -403,7 +557,7 @@ final class AnalysisManager: AnalysisManaging {
                     } catch {
                         print("Error during video processing for batch \(batchId): \(error.localizedDescription). Some summaries may be missing.")
                         if allProcessedCardInfo.isEmpty && !activityCards.isEmpty {
-                             for activityCard in activityCards {
+                             for (cardIndex, activityCard) in activityCards.enumerated() {
                                 var processedDistractionInfos: [ProcessedDistractionInfo] = []
                                 if let originalDistractions = activityCard.distractions {
                                     for dist in originalDistractions {
@@ -411,7 +565,8 @@ final class AnalysisManager: AnalysisManaging {
                                         processedDistractionInfos.append(ProcessedDistractionInfo(originalDistraction: dist, clockStartTime: dist.startTime, clockEndTime: dist.endTime, videoSummaryPath: nil))
                                     }
                                 }
-                                allProcessedCardInfo.append(ProcessedCardInfo(activityCard: activityCard, dbCardId: nil, activityCardSummaryPath: nil, processedDistractions: processedDistractionInfos))
+                                let dbCardId = cardIndex < cardIds.count ? cardIds[cardIndex] : nil
+                                allProcessedCardInfo.append(ProcessedCardInfo(activityCard: activityCard, dbCardId: dbCardId, activityCardSummaryPath: nil, processedDistractions: processedDistractionInfos))
                             }
                         }
                     }
@@ -561,5 +716,17 @@ private func createBatches(from chunks: [RecordingChunk]) -> [AnalysisBatch] {
                            minute: timeComponents.minute ?? 0,
                            second: 0,
                            of: baseDate)
+    }
+    
+    // Formats a duration in seconds to a human-readable string
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds) / 60
+        let remainingSeconds = Int(seconds) % 60
+        
+        if minutes > 0 {
+            return "\(minutes)m \(remainingSeconds)s"
+        } else {
+            return "\(remainingSeconds)s"
+        }
     }
 }

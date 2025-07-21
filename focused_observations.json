@@ -1,0 +1,74 @@
+[
+  {
+    "start_ts": 1753621800,
+    "end_ts": 1753622100,
+    "observation": "User opens IntelliJ IDEA and continues working on Java Spring Boot microservice. Implements authentication endpoint with JWT tokens.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622100,
+    "end_ts": 1753622400,
+    "observation": "User writes unit tests for the authentication service using JUnit and Mockito. All tests pass on first run.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622400,
+    "end_ts": 1753622700,
+    "observation": "User refactors the authentication logic to extract common validation methods. Updates related documentation in README.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753622700,
+    "end_ts": 1753623000,
+    "observation": "User implements password reset functionality. Adds new endpoints and email service integration.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623000,
+    "end_ts": 1753623300,
+    "observation": "User continues with password reset feature. Writes database migrations and updates the user model.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623300,
+    "end_ts": 1753623600,
+    "observation": "User tests the complete authentication flow manually using Postman. Documents API endpoints in Swagger.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623600,
+    "end_ts": 1753623900,
+    "observation": "User runs integration tests for the entire auth module. Fixes a minor bug in token expiration logic.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753623900,
+    "end_ts": 1753624200,
+    "observation": "User commits all changes with detailed commit message. Creates pull request with comprehensive description.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624200,
+    "end_ts": 1753624500,
+    "observation": "User switches to code review mode. Reviews teammate's pull request for payment service integration.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624500,
+    "end_ts": 1753624800,
+    "observation": "User continues code review, leaving detailed comments and suggestions. Approves PR after discussion in comments.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753624800,
+    "end_ts": 1753625100,
+    "observation": "User starts new task - implementing rate limiting middleware. Researches best practices and chooses Redis-based approach.",
+    "metadata": {"model": "dummy_data"}
+  },
+  {
+    "start_ts": 1753625100,
+    "end_ts": 1753625400,
+    "observation": "User implements basic rate limiting logic using Redis. Writes configuration for different API endpoints.",
+    "metadata": {"model": "dummy_data"}
+  }
+]

@@ -18,11 +18,12 @@ final class OllamaProvider: LLMProvider {
         self.endpoint = endpoint
     }
     
-    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date) async throws -> (observations: [Observation], log: LLMCall) {
+    func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date, videoDuration: TimeInterval) async throws -> (observations: [Observation], log: LLMCall) {
         let callStart = Date()
-        print("\n[OLLAMA] Starting video transcription")
+        print("\n🚀 [OLLAMA] Starting observation generation at \(formatTime(callStart))")
         print("[OLLAMA] Video size: \(videoData.count / 1024 / 1024) MB")
         print("[OLLAMA] Batch start time: \(batchStartTime)")
+        print("📹 [OLLAMA] Video duration: \(String(format: "%.2f", videoDuration)) seconds (\(String(format: "%.1f", videoDuration/60)) minutes)")
         
         // Save video to temporary file for processing
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -63,11 +64,15 @@ final class OllamaProvider: LLMProvider {
             output: "Processed \(observations.count) frames in \(String(format: "%.2f", totalTime))s"
         )
         
+        let duration = Date().timeIntervalSince(callStart)
+        print("✅ [OLLAMA] Observation generation completed in \(String(format: "%.2f", duration)) seconds")
+        
         return (observations, log)
     }
     
     func generateActivityCards(observations: [Observation], context: ActivityGenerationContext) async throws -> (cards: [ActivityCard], log: LLMCall) {
         let callStart = Date()
+        print("\n🚀 [OLLAMA] Starting activity card generation at \(formatTime(callStart))")
         
         // Format observations for the prompt
         let observationsText = observations.map { obs in
@@ -132,6 +137,9 @@ final class OllamaProvider: LLMProvider {
             input: prompt,
             output: response.response
         )
+        
+        let duration = Date().timeIntervalSince(callStart)
+        print("✅ [OLLAMA] Activity card generation completed in \(String(format: "%.2f", duration)) seconds")
         
         return (cards, log)
     }
@@ -436,4 +444,9 @@ final class OllamaProvider: LLMProvider {
         return ollamaResponse
     }
     
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
 }

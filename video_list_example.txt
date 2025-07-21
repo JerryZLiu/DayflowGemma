@@ -1,0 +1,7 @@
+# Example video list file
+# Put one video path per line
+# Lines starting with # are ignored
+
+/path/to/video1.mp4
+/path/to/video2.mp4
+/Users/username/Desktop/recording.mov
