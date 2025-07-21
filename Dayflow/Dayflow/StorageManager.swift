@@ -199,7 +199,6 @@ struct TimelineCardShell: Sendable {
     let title: String
     let summary: String
     let detailedSummary: String
-    let day: String
     let distractions: [Distraction]? // Keep this, it's part of the initial save
     // No videoSummaryURL here, as it's added later
     // No batchId here, as it's passed as a separate parameter to the save function
@@ -510,8 +509,10 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         timeFormatter.dateFormat = "h:mm a"
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         
-        guard let baseDate = self.dateFormatter.date(from: card.day),
-              let startTime = timeFormatter.date(from: card.startTimestamp),
+        // Since we don't have the day anymore, use today's date as base
+        let baseDate = Date()
+        
+        guard let startTime = timeFormatter.date(from: card.startTimestamp),
               let endTime = timeFormatter.date(from: card.endTimestamp) else {
             return nil
         }
@@ -555,6 +556,9 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
 
             print("🔍 DEBUG: About to INSERT timeline card: '\(card.title)' [\(card.startTimestamp) - \(card.endTimestamp)] with timestamps [\(startTs) - \(endTs)]")
             
+            // Calculate the day string from the start timestamp
+            let dayString = self.dateFormatter.string(from: startDate)
+            
             try db.execute(sql: """
                 INSERT INTO timeline_cards(
                     batch_id, start, end, start_ts, end_ts, day, title,
@@ -563,7 +567,7 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [
-                batchId, card.startTimestamp, card.endTimestamp, startTs, endTs, card.day, card.title,
+                batchId, card.startTimestamp, card.endTimestamp, startTs, endTs, dayString, card.title,
                 card.summary, card.category, card.subcategory, card.detailedSummary, distractionsString
             ])
             lastId = db.lastInsertedRowID
@@ -624,12 +628,38 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
 
     func fetchTimelineCards(forDay day: String) -> [TimelineCard] {
         let decoder = JSONDecoder()
+        
+        // Parse the day string to get the date
+        guard let dayDate = dateFormatter.date(from: day) else {
+            return []
+        }
+        
+        let calendar = Calendar.current
+        
+        // Get 4 AM of the given day as the start
+        var startComponents = calendar.dateComponents([.year, .month, .day], from: dayDate)
+        startComponents.hour = 4
+        startComponents.minute = 0
+        startComponents.second = 0
+        guard let dayStart = calendar.date(from: startComponents) else { return [] }
+        
+        // Get 4 AM of the next day as the end
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: dayDate) else { return [] }
+        var endComponents = calendar.dateComponents([.year, .month, .day], from: nextDay)
+        endComponents.hour = 4
+        endComponents.minute = 0
+        endComponents.second = 0
+        guard let dayEnd = calendar.date(from: endComponents) else { return [] }
+        
+        let startTs = Int(dayStart.timeIntervalSince1970)
+        let endTs = Int(dayEnd.timeIntervalSince1970)
+        
         let cards: [TimelineCard]? = try? db.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT * FROM timeline_cards
-                WHERE day = ?
-                ORDER BY COALESCE(start_ts, 0) ASC, start ASC -- Order by timestamp first, then clock time as fallback
-            """, arguments: [day])
+                WHERE start_ts >= ? AND start_ts < ?
+                ORDER BY start_ts ASC, start ASC
+            """, arguments: [startTs, endTs])
             .map { row in
                 // Decode distractions from metadata JSON
                 var distractions: [Distraction]? = nil
@@ -769,13 +799,21 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 }
                 
                 // Parse clock times to Unix timestamps
-                guard let baseDate = self.dateFormatter.date(from: card.day),
-                      let startTime = timeFormatter.date(from: card.startTimestamp),
+                // Since we don't have the day anymore, we need to infer it from the time range
+                // Use the 'from' date as the base date for parsing
+                let calendar = Calendar.current
+                var baseDate = from
+                
+                // Adjust to the logical day (considering 4 AM boundary)
+                let hour = calendar.component(.hour, from: baseDate)
+                if hour < 4 {
+                    baseDate = calendar.date(byAdding: .day, value: -1, to: baseDate) ?? baseDate
+                }
+                
+                guard let startTime = timeFormatter.date(from: card.startTimestamp),
                       let endTime = timeFormatter.date(from: card.endTimestamp) else {
                     continue
                 }
-                
-                let calendar = Calendar.current
                 
                 // Parse start timestamp
                 let startComponents = calendar.dateComponents([.hour, .minute], from: startTime)
@@ -803,6 +841,9 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 
                 let endTs = Int(endDate.timeIntervalSince1970)
                 
+                // Calculate the day string from the start timestamp for backward compatibility
+                let dayString = self.dateFormatter.string(from: startDate)
+                
                 try db.execute(sql: """
                     INSERT INTO timeline_cards(
                         batch_id, start, end, start_ts, end_ts, day, title,
@@ -810,7 +851,7 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [
-                    batchId, card.startTimestamp, card.endTimestamp, startTs, endTs, card.day, card.title,
+                    batchId, card.startTimestamp, card.endTimestamp, startTs, endTs, dayString, card.title,
                     card.summary, card.category, card.subcategory, card.detailedSummary, distractionsString
                 ])
                 
@@ -982,19 +1023,44 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
     func deleteTimelineCards(forDay day: String) -> [String] {
         var videoPaths: [String] = []
         
+        // Parse the day string to get the date
+        guard let dayDate = dateFormatter.date(from: day) else {
+            return []
+        }
+        
+        let calendar = Calendar.current
+        
+        // Get 4 AM of the given day as the start
+        var startComponents = calendar.dateComponents([.year, .month, .day], from: dayDate)
+        startComponents.hour = 4
+        startComponents.minute = 0
+        startComponents.second = 0
+        guard let dayStart = calendar.date(from: startComponents) else { return [] }
+        
+        // Get 4 AM of the next day as the end
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: dayDate) else { return [] }
+        var endComponents = calendar.dateComponents([.year, .month, .day], from: nextDay)
+        endComponents.hour = 4
+        endComponents.minute = 0
+        endComponents.second = 0
+        guard let dayEnd = calendar.date(from: endComponents) else { return [] }
+        
+        let startTs = Int(dayStart.timeIntervalSince1970)
+        let endTs = Int(dayEnd.timeIntervalSince1970)
+        
         try? db.write { db in
             // First fetch all video paths before deletion
             let rows = try Row.fetchAll(db, sql: """
                 SELECT video_summary_url FROM timeline_cards
-                WHERE day = ? AND video_summary_url IS NOT NULL
-            """, arguments: [day])
+                WHERE start_ts >= ? AND start_ts < ? AND video_summary_url IS NOT NULL
+            """, arguments: [startTs, endTs])
             
             videoPaths = rows.compactMap { $0["video_summary_url"] as? String }
             
             // Delete the timeline cards
             try db.execute(sql: """
-                DELETE FROM timeline_cards WHERE day = ?
-            """, arguments: [day])
+                DELETE FROM timeline_cards WHERE start_ts >= ? AND start_ts < ?
+            """, arguments: [startTs, endTs])
         }
         
         return videoPaths

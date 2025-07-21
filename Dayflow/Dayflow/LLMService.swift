@@ -202,10 +202,6 @@ final class LLMService: LLMServicing {
                 }
                 
                 // Prepare context for activity generation
-                let calendar = Calendar.current
-                let today = calendar.startOfDay(for: Date())
-                let todayString = StorageManager.shared.dateFormatter.string(from: today)
-                
                 let userTaxonomy = UserDefaults.standard.string(forKey: "userTaxonomy") ?? ""
                 let extractedTaxonomy = UserDefaults.standard.string(forKey: "extractedTaxonomy") ?? ""
                 
@@ -235,7 +231,6 @@ final class LLMService: LLMServicing {
                             title: card.title,
                             summary: card.summary,
                             detailedSummary: card.detailedSummary,
-                            day: todayString,
                             distractions: card.distractions
                         )
                     },
