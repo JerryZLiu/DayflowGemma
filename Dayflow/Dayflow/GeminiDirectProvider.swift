@@ -253,7 +253,7 @@ final class GeminiDirectProvider: LLMProvider {
         let activityGenerationPrompt = """
         You are a digital anthropologist, observing a user's raw activity log. Your goal is to synthesize this log into a high-level, human-readable story of their session, presented as a series of timeline cards.
         THE GOLDEN RULE:
-        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes. However, thematic coherence is essential - a card must tell a coherent story. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it. 
+        Your primary objective is to create long, meaningful cards that represent a cohesive session of activity, ideally 30-60 minutes+. However, thematic coherence is essential - a card must tell a coherent story. Avoid creating cards shorter than 15-20 minutes unless a major context switch forces it. 
         CRITICAL DATA INTEGRITY RULE:
         When you decide to extend a card, its original startTime is IMMUTABLE. You MUST carry over the startTime from the previous_card you are extending. Failure to preserve the original startTime is a critical error.
         CORE DIRECTIVES:
