@@ -288,26 +288,47 @@ final class GeminiDirectProvider: LLMProvider {
         - "Continuing from earlier" (references other cards)
 
         Summary guidelines:
-        Write summaries like journal entries - first person without using "I". Natural, conversational, factual.
+        Write brief factual summaries optimized for quick scanning. First person perspective without "I".
 
-        Rules:
-        - 2-3 sentences that add context beyond the title
-        - Connect to earlier/later activities when relevant ("continued from earlier", "finally got back to")
-        - Be specific about what happened without listing every detail
-        - Include subtle context words that feel natural ("ended up", "kept getting distracted", "spent way too long")
-        - Never assume the user's feelings or intentions ("loved it", "got frustrated", "decided to buy")
+        Critical rules - NEVER:
+        - Use third person ("The session", "The work")
+        - Assume future actions, mental states, or unverifiable details
+        - Add filler phrases like "kicked off", "dove into", "started with", "began by"
+        - Write more than 2-3 short sentences
+        - Repeat the same phrases across different summaries
+
+        Style guidelines:
+        - State what happened directly - no lead-ins
+        - List activities and tools concisely
+        - Mention major interruptions or context switches briefly
+        - Keep technical terms simple
+
+        Content rules:
+        - Maximum 2-3 sentences
+        - Just the facts: what you did, which tools/projects, major blockers
+        - Include specific names (apps, tools, sites) not generic terms
+        - Note pattern interruptions without elaborating
 
         Good examples:
-        - "Watched several React tutorials on YouTube before switching to the official docs. Ended up refactoring components in VS Code while referencing the useEffect documentation."
-        - "Read through NVIDIA's investor relations page, focusing on their latest quarterly filing. Then pulled up AMD's earnings for comparison and took notes in Notion."
-        - "Browsed meal prep ideas on Pinterest and various food blogs. Started a grocery list in Notes and looked up several chicken recipes for the week."
-        - "Spent the morning on Zillow and StreetEasy looking at apartments near subway lines. Created a spreadsheet to compare options and started bookmarking promising listings."
+
+        "Refactored the user auth module in React, added OAuth support. Debugged CORS issues with the backend API for an hour. Posted question on Stack Overflow when the fix wasn't working."
+
+        "Designed new landing page mockups in Figma. Exported assets and started implementing in Next.js before getting pulled into a client meeting that ran long."
+
+        "Researched competitors' pricing models across SaaS platforms. Built comparison spreadsheet and wrote up recommendations. Got sidetracked reading an article about pricing psychology."
+
+        "Configured CI/CD pipeline in GitHub Actions. Tests kept failing on the build step, turned out to be a Node version mismatch. Fixed it and deployed to staging."
 
         Bad examples:
-        - "The user conducted extensive research..." (too formal, third person)
-        - "Started with X, then did Y, then moved to Z" (formulaic)
-        - "Loved the reviews and decided to buy one" (assumes feelings)
-        - "Looked at 47 different websites" (false precision)
+
+        "Kicked off the morning by diving into some design work before transitioning to development tasks. The session was quite productive overall."
+        (Too vague, unnecessary transitions, says nothing specific)
+
+        "Started with refactoring the authentication system before moving on to debugging some issues that came up. Ended up spending time researching solutions online."
+        (Wordy, lacks specifics, could be half the length)
+
+        "Began by reviewing the codebase and then dove deep into implementing new features. The work involved multiple context switches between different parts of the application."
+        (All filler, no actual information)
 
         YOUR MENTAL MODEL (How to Decide):
         Before making a decision, ask yourself these questions in order:

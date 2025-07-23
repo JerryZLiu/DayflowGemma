@@ -22,23 +22,23 @@ enum VideoProcessingError: Error {
 actor VideoProcessingService {
     private let fileManager = FileManager.default
     private let temporaryDirectoryURL: URL
-    private let persistentSummariesRootURL: URL
+    private let persistentTimelapsesRootURL: URL
 
     init() {
         self.temporaryDirectoryURL = fileManager.temporaryDirectory
 
-        // Create a persistent directory for summaries within Application Support
+        // Create a persistent directory for timelapses within Application Support
         let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        self.persistentSummariesRootURL = appSupportURL.appendingPathComponent("Dayflow/summaries", isDirectory: true)
+        self.persistentTimelapsesRootURL = appSupportURL.appendingPathComponent("Dayflow/timelapses", isDirectory: true)
 
-        // Ensure the root summaries directory exists
+        // Ensure the root timelapses directory exists
         do {
-            try fileManager.createDirectory(at: self.persistentSummariesRootURL,
+            try fileManager.createDirectory(at: self.persistentTimelapsesRootURL,
                                             withIntermediateDirectories: true,
                                             attributes: nil)
         } catch {
             // Log this, but don't fail initialization.
-            print("Error creating persistent summaries root directory: \(self.persistentSummariesRootURL.path). Error: \(error)")
+            print("Error creating persistent timelapses root directory: \(self.persistentTimelapsesRootURL.path). Error: \(error)")
         }
     }
 
@@ -46,13 +46,13 @@ actor VideoProcessingService {
         temporaryDirectoryURL.appendingPathComponent(UUID().uuidString + "." + ext)
     }
 
-    func generatePersistentSummaryURL(for date: Date,
+    func generatePersistentTimelapseURL(for date: Date,
                                       originalFileName: String) -> URL {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateString = dateFormatter.string(from: date)
 
-        let dateSpecificDir = persistentSummariesRootURL
+        let dateSpecificDir = persistentTimelapsesRootURL
             .appendingPathComponent(dateString, isDirectory: true)
 
         do {
@@ -60,13 +60,13 @@ actor VideoProcessingService {
                                             withIntermediateDirectories: true,
                                             attributes: nil)
         } catch {
-            print("Error creating date-specific summary directory: \(dateSpecificDir.path). Error: \(error)")
-            return persistentSummariesRootURL
-                .appendingPathComponent(originalFileName + "_summary.mp4")
+            print("Error creating date-specific timelapse directory: \(dateSpecificDir.path). Error: \(error)")
+            return persistentTimelapsesRootURL
+                .appendingPathComponent(originalFileName + "_timelapse.mp4")
         }
 
         return dateSpecificDir
-            .appendingPathComponent(originalFileName + "_summary.mp4")
+            .appendingPathComponent(originalFileName + "_timelapse.mp4")
     }
 
     /// If multiple URLs, stitches them; if one, copies it to a temp location.
@@ -164,121 +164,88 @@ actor VideoProcessingService {
         return tempOutputURL
     }
 
-    /// Pick every N‑th frame and re‑encode at `outputFPS`.
-    func generateVideoSummary(sourceVideoURL: URL,
-                              outputSummaryFileURL: URL,
-                              inputFramePickIntervalFactorN: Int,
-                              outputFPS: Int = 2) async throws {
+    /// Generate a timelapse video by picking frames at interval and re-encoding at higher FPS
+    func generateTimelapse(sourceVideoURL: URL,
+                          outputTimelapseFileURL: URL,
+                          speedupFactor: Int = 8,
+                          outputFPS: Int = 30) async throws {
         let asset = AVURLAsset(url: sourceVideoURL)
         guard let assetTrack = try await asset.loadTracks(withMediaType: .video).first else {
             print("Error: No video track in \(sourceVideoURL.lastPathComponent)")
             throw VideoProcessingError.noVideoTracks
         }
 
-        // Resolve dimensions after transform
+        // Get video properties
+        let duration = try await asset.load(.duration)
         let naturalSize = try await assetTrack.load(.naturalSize)
         let preferredTransform = try await assetTrack.load(.preferredTransform)
         let actualSize = naturalSize.applying(preferredTransform)
         let width = Int(abs(actualSize.width))
         let height = Int(abs(actualSize.height))
-
-        // Reader
-        let assetReader = try AVAssetReader(asset: asset)
-        let readerOutputSettings: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB
-        ]
-        let readerVideoOutput = AVAssetReaderVideoCompositionOutput(videoTracks: [assetTrack],
-                                                                    videoSettings: readerOutputSettings)
-
-        // Apply transform via a composition
+        let nominalFrameRate = try await assetTrack.load(.nominalFrameRate)
+        
+        // Create composition with time mapping for speedup
+        let composition = AVMutableComposition()
+        guard let compositionTrack = composition.addMutableTrack(withMediaType: .video,
+                                                                preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw VideoProcessingError.noVideoTracks
+        }
+        
+        // Calculate new duration after speedup
+        let scaledDuration = CMTimeMultiplyByFloat64(duration, multiplier: 1.0 / Double(speedupFactor))
+        
+        // Insert the entire video but we'll use time mapping
+        try compositionTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
+                                           of: assetTrack,
+                                           at: .zero)
+        
+        // Scale the time to achieve speedup
+        compositionTrack.scaleTimeRange(CMTimeRange(start: .zero, duration: duration),
+                                       toDuration: scaledDuration)
+        
+        // Set up export session
+        guard let exportSession = AVAssetExportSession(asset: composition,
+                                                      presetName: AVAssetExportPresetHighestQuality) else {
+            throw VideoProcessingError.exportSessionCreationFailed
+        }
+        
+        // Ensure output directory exists
+        let outputDir = outputTimelapseFileURL.deletingLastPathComponent()
+        if !fileManager.fileExists(atPath: outputDir.path) {
+            try? fileManager.createDirectory(at: outputDir,
+                                           withIntermediateDirectories: true,
+                                           attributes: nil)
+        }
+        if fileManager.fileExists(atPath: outputTimelapseFileURL.path) {
+            try? fileManager.removeItem(at: outputTimelapseFileURL)
+        }
+        
+        // Configure export
+        exportSession.outputURL = outputTimelapseFileURL
+        exportSession.outputFileType = .mp4
+        exportSession.shouldOptimizeForNetworkUse = true
+        
+        // Set up video composition to maintain proper dimensions and apply transform
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = CGSize(width: width, height: height)
-        let fps = max(1, Int(try await assetTrack.load(.nominalFrameRate)))
-        videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(fps))
-
+        videoComposition.frameDuration = CMTime(value: 1, timescale: Int32(outputFPS))
+        
         let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero,
-                                            duration: try await asset.load(.duration))
-
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: assetTrack)
+        instruction.timeRange = CMTimeRange(start: .zero, duration: scaledDuration)
+        
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionTrack)
         layerInstruction.setTransform(preferredTransform, at: .zero)
         instruction.layerInstructions = [layerInstruction]
         videoComposition.instructions = [instruction]
-
-        readerVideoOutput.videoComposition = videoComposition
-        guard assetReader.canAdd(readerVideoOutput) else {
-            throw VideoProcessingError.assetReaderCreationFailed(nil)
-        }
-        assetReader.add(readerVideoOutput)
-
-        // Writer
-        let outputDir = outputSummaryFileURL.deletingLastPathComponent()
-        if !fileManager.fileExists(atPath: outputDir.path) {
-            try? fileManager.createDirectory(at: outputDir,
-                                             withIntermediateDirectories: true,
-                                             attributes: nil)
-        }
-        if fileManager.fileExists(atPath: outputSummaryFileURL.path) {
-            try? fileManager.removeItem(at: outputSummaryFileURL)
-        }
-
-        let assetWriter = try AVAssetWriter(outputURL: outputSummaryFileURL,
-                                            fileType: .mp4)
-        let writerInputSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height
-        ]
-        let writerInput = AVAssetWriterInput(mediaType: .video,
-                                             outputSettings: writerInputSettings)
-        writerInput.expectsMediaDataInRealTime = false
-        guard assetWriter.canAdd(writerInput) else {
-            throw VideoProcessingError.assetWriterInputCreationFailed
-        }
-        assetWriter.add(writerInput)
-        guard assetWriter.startWriting() else {
-            throw VideoProcessingError.assetWriterStartFailed(assetWriter.error)
-        }
-        assetWriter.startSession(atSourceTime: .zero)
-
-        // Read & write
-        var inputFrameCount: Int64 = 0
-        var outputFrameCount: Int64 = 0
-        assetReader.startReading()
-
-        while assetReader.status == .reading,
-              let sampleBuffer = readerVideoOutput.copyNextSampleBuffer() {
-
-            if inputFrameCount % Int64(inputFramePickIntervalFactorN) == 0,
-               writerInput.isReadyForMoreMediaData {
-
-                var timing = CMSampleTimingInfo(
-                    duration: CMSampleBufferGetDuration(sampleBuffer),
-                    presentationTimeStamp: CMTime(value: outputFrameCount,
-                                                  timescale: Int32(outputFPS)),
-                    decodeTimeStamp: CMSampleBufferGetDecodeTimeStamp(sampleBuffer)
-                )
-                var newBuffer: CMSampleBuffer?
-                let status = CMSampleBufferCreateCopyWithNewTiming(
-                    allocator: kCFAllocatorDefault,
-                    sampleBuffer: sampleBuffer,
-                    sampleTimingEntryCount: 1,
-                    sampleTimingArray: &timing,
-                    sampleBufferOut: &newBuffer
-                )
-                if status == noErr, let final = newBuffer {
-                    writerInput.append(final)
-                    outputFrameCount += 1
-                }
-            }
-            inputFrameCount += 1
-        }
-
-        writerInput.markAsFinished()
-        await assetWriter.finishWriting()
-
-        if assetWriter.status != .completed {
-            throw VideoProcessingError.exportFailed(assetWriter.error)
+        
+        exportSession.videoComposition = videoComposition
+        
+        // Export
+        await exportSession.export()
+        
+        guard exportSession.status == .completed else {
+            print("Timelapse export failed. Status: \(exportSession.status). Error: \(exportSession.error?.localizedDescription ?? "No error description available")")
+            throw VideoProcessingError.exportFailed(exportSession.error)
         }
     }
 

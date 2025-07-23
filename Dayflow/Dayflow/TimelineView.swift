@@ -34,25 +34,23 @@ struct TimelineView: View {
     @State private var isReprocessing = false
     @State private var reprocessingProgress = ""
     @State private var showBatchSelection = false
+    @State private var refreshTimer: Timer?
     
     private let storageManager = StorageManager.shared
     private let analysisManager = AnalysisManager.shared
     
     var body: some View {
         ZStack {
-            // Gradient background
-            LinearGradient(
-                colors: [Color(hex: "#FFE5B4"), Color(hex: "#FFB347")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Clean background
+            Color(hex: "#FFFBF0")
+                .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 // Header
                 HeaderView(selectedDate: $selectedDate, showDatePicker: $showDatePicker, showReprocessConfirmation: $showReprocessConfirmation)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 30)
+                    .padding(.horizontal, 60)
+                    .padding(.top, 20)
+                    .padding(.bottom, 10)
                 
                 // Timeline content
                 ScrollView {
@@ -60,8 +58,8 @@ struct TimelineView: View {
                         activities: activities,
                         expandedActivity: $expandedActivity
                     )
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 30)
+                    .padding(.horizontal, 60)
+                    .padding(.vertical, 20)
                 }
                 
                 if isLoading {
@@ -73,6 +71,10 @@ struct TimelineView: View {
         }
         .onAppear {
             loadActivities()
+            startRefreshTimer()
+        }
+        .onDisappear {
+            stopRefreshTimer()
         }
         .onChange(of: selectedDate) { _ in
             loadActivities()
@@ -131,6 +133,19 @@ struct TimelineView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Timer Management
+    private func startRefreshTimer() {
+        // Refresh every 60 seconds
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { _ in
+            loadActivities()
+        }
+    }
+    
+    private func stopRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
     
     // MARK: - Data Loading
@@ -363,22 +378,28 @@ struct HeaderView: View {
     var body: some View {
         HStack {
             Text("Timeline")
-                .font(.system(size: 48, weight: .light))
-                .foregroundColor(Color(hex: "#FF6347"))
+                .font(.system(size: 32, weight: .light))
+                .foregroundColor(Color(hex: "#1A1A1A"))
             
             Spacer()
             
             HStack(spacing: 12) {
                 // Date picker button
-                HStack(spacing: 15) {
+                HStack(spacing: 8) {
                     Image(systemName: "calendar")
+                        .font(.system(size: 14))
                     Text(dateFormatter.string(from: displayDate))
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: 16, weight: .regular))
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.9))
-                .cornerRadius(20)
+                .foregroundColor(Color(hex: "#4A4A4A"))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(hex: "#E0E0E0"), lineWidth: 1)
+                )
+                .cornerRadius(6)
                 .onTapGesture {
                     showDatePicker = true
                 }
@@ -387,18 +408,30 @@ struct HeaderView: View {
                 Button(action: {
                     showReprocessConfirmation = true
                 }) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14))
                         Text("Rerun Analysis")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .regular))
                     }
+                    .foregroundColor(Color(hex: "#666666"))
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .foregroundColor(.white)
-                    .background(Color(hex: "#FF6347"))
-                    .cornerRadius(20)
+                    .padding(.vertical, 8)
+                    .background(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color(hex: "#E0E0E0"), lineWidth: 1)
+                    )
+                    .cornerRadius(6)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
             }
         }
     }
@@ -409,22 +442,50 @@ struct TimelineContent: View {
     let activities: [TimelineActivity]
     @Binding var expandedActivity: TimelineActivity?
     
+    // Calculate gap in pixels based on time difference
+    private func gapHeight(between current: TimelineActivity, and next: TimelineActivity) -> CGFloat {
+        let timeDiff = next.startTime.timeIntervalSince(current.endTime) / 60 // minutes
+        
+        // No gap if activities are adjacent (less than 15 minutes)
+        if timeDiff < 15 {
+            return 0
+        }
+        
+        // Base gap of 20px for 15 minutes, then 2px per additional minute
+        let baseGap: CGFloat = 20
+        let additionalMinutes = timeDiff - 15
+        let pixelsPerMinute: CGFloat = 2
+        
+        // Cap the maximum gap at 100px (about 1 hour gap)
+        return min(baseGap + (additionalMinutes * pixelsPerMinute), 100)
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(activities) { activity in
+            ForEach(Array(activities.enumerated()), id: \.element.id) { index, activity in
                 TimelineRow(
                     activity: activity,
                     isExpanded: expandedActivity?.id == activity.id,
                     onTap: {
-                        withAnimation(.spring()) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
                             if expandedActivity?.id == activity.id {
                                 expandedActivity = nil
                             } else {
                                 expandedActivity = activity
                             }
                         }
-                    }
+                    },
+                    isLast: index == activities.count - 1
                 )
+                
+                // Add gap if there's a time gap to the next activity
+                if index < activities.count - 1 {
+                    let gap = gapHeight(between: activity, and: activities[index + 1])
+                    if gap > 0 {
+                        Spacer()
+                            .frame(height: gap)
+                    }
+                }
             }
         }
     }
@@ -435,6 +496,7 @@ struct TimelineRow: View {
     let activity: TimelineActivity
     let isExpanded: Bool
     let onTap: () -> Void
+    let isLast: Bool
     
     private var timeFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -442,43 +504,72 @@ struct TimelineRow: View {
         return formatter
     }
     
+    private var duration: TimeInterval {
+        activity.endTime.timeIntervalSince(activity.startTime)
+    }
+    
+    private var durationInMinutes: Int {
+        Int(duration / 60)
+    }
+    
+    private var cardHeight: CGFloat {
+        // Base height: 100px for 15 min, +2.67px per additional minute
+        let baseHeight: CGFloat = 100
+        let additionalHeight = CGFloat(max(0, durationInMinutes - 15)) * 2.67
+        let calculatedHeight = baseHeight + additionalHeight
+        // Cap at 300px for very long sessions
+        return min(300, max(80, calculatedHeight))
+    }
+    
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
-            // Time label
-            VStack(alignment: .trailing, spacing: 5) {
+        HStack(alignment: .top, spacing: 0) {
+            // Time label and dot
+            HStack(alignment: .top, spacing: 8) {
                 Text(timeFormatter.string(from: activity.startTime))
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.black.opacity(0.8))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(hex: "#666666"))
+                    .frame(width: 60, alignment: .trailing)
                 
-                // Timeline indicator
-                Circle()
-                    .fill(Color.black)
-                    .frame(width: 12, height: 12)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white, lineWidth: 2)
-                    )
+                ZStack {
+                    // Timeline line behind the dot - now using dotted pattern
+                    if !isLast {
+                        GeometryReader { geometry in
+                            Path { path in
+                                let dashHeight: CGFloat = 3
+                                let dashSpacing: CGFloat = 5
+                                var currentY: CGFloat = 12
+                                
+                                while currentY < geometry.size.height {
+                                    path.move(to: CGPoint(x: 0.5, y: currentY))
+                                    path.addLine(to: CGPoint(x: 0.5, y: currentY + dashHeight))
+                                    currentY += dashHeight + dashSpacing
+                                }
+                            }
+                            .stroke(Color(hex: "#CCCCCC"), lineWidth: 1.5)
+                        }
+                        .frame(width: 2)
+                    }
+                    
+                    // Timeline dot
+                    Circle()
+                        .fill(Color(hex: "#333333"))
+                        .frame(width: 10, height: 10)
+                        .zIndex(1)
+                }
+                .frame(width: 10)
             }
-            .frame(width: 80)
             
             // Activity card
-            VStack(alignment: .leading, spacing: 0) {
-                TimelineActivityCard(
-                    activity: activity,
-                    isExpanded: isExpanded,
-                    onTap: onTap
-                )
-                
-                // Timeline line
-                if !isExpanded {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.2))
-                        .frame(width: 2)
-                        .frame(minHeight: 50)
-                        .padding(.leading, 40)
-                }
-            }
+            TimelineActivityCard(
+                activity: activity,
+                isExpanded: isExpanded,
+                cardHeight: cardHeight,
+                durationInMinutes: durationInMinutes,
+                onTap: onTap
+            )
+            .padding(.leading, 20)
         }
+        .padding(.bottom, isExpanded ? 20 : 8)
     }
 }
 
@@ -486,10 +577,30 @@ struct TimelineRow: View {
 struct TimelineActivityCard: View {
     let activity: TimelineActivity
     let isExpanded: Bool
+    let cardHeight: CGFloat
+    let durationInMinutes: Int
     let onTap: () -> Void
     
+    // Category gradient colors
+    private func gradientColors(for category: String) -> [Color] {
+        switch category.lowercased() {
+        case "productive work", "work", "research", "coding", "writing":
+            return [Color(hex: "FFFEFE"), Color(hex: "D9F2FB")]
+        case "personal", "social", "communication":
+            return [Color(hex: "FFFFFF"), Color(hex: "F0E6FF")]
+        case "distraction", "entertainment":
+            return [Color(hex: "FFFFFF"), Color(hex: "FFE8E8")]
+        case "learning", "education":
+            return [Color(hex: "FFFFFF"), Color(hex: "FFF4E8")]
+        case "idle", "break":
+            return [Color(hex: "FFFFFF"), Color(hex: "F8F5F8")]
+        default:
+            return [Color(hex: "FFFFFF"), Color(hex: "F5F5F5")]
+        }
+    }
+    
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 12) {
                 // Time range
                 Text(formatTimeRange(start: activity.startTime, end: activity.endTime))
@@ -504,10 +615,6 @@ struct TimelineActivityCard: View {
                     .background(Color.white.opacity(0.5))
                     .cornerRadius(8)
                 
-                Text(activity.title)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.black.opacity(0.9))
-                
                 Spacer()
                 
                 if isExpanded {
@@ -520,17 +627,24 @@ struct TimelineActivityCard: View {
                 }
             }
             
+            Text(activity.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color(hex: "1A1A1A"))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            
             if !isExpanded && !activity.summary.isEmpty {
                 Text(activity.summary)
                     .font(.system(size: 14))
                     .foregroundColor(.black.opacity(0.7))
-                    .lineLimit(2)
-                    .padding(.top, 4)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             
             if isExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(activity.detailedSummary)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(activity.summary)
                         .font(.system(size: 14))
                         .foregroundColor(.black.opacity(0.8))
                     
@@ -564,22 +678,35 @@ struct TimelineActivityCard: View {
                 .padding(.top, 5)
             }
         }
-        .padding(20)
-        .background(Color.white.opacity(0.95))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
-        .onTapGesture(perform: onTap)
-        .overlay(
-            HStack {
-                Spacer()
-                Image(systemName: "hand.point.up.left")
-                    .font(.system(size: 24))
-                    .foregroundColor(.black.opacity(0.8))
-                    .offset(x: 30, y: 30)
+        .padding(14)
+        .frame(height: isExpanded ? nil : cardHeight)
+        .frame(maxWidth: 600)
+        .background(
+            ZStack {
+                // Gradient background
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: gradientColors(for: activity.category)),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                
+                // Diagonal pattern for distractions
+                if activity.category.lowercased() == "distraction" || activity.category.lowercased() == "entertainment" {
+                    DiagonalPatternFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
             }
-            .opacity(isExpanded ? 0 : 1)
-            .animation(.easeInOut, value: isExpanded)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
+        .onTapGesture(perform: onTap)
     }
     
     private func formatTimeRange(start: Date, end: Date) -> String {

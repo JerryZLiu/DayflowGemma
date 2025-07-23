@@ -96,12 +96,7 @@ struct BatchSelectionView: View {
     
     private func loadBatches() {
         batches = StorageManager.shared.fetchBatches(forDay: day)
-        // Pre-select batches that might need reprocessing
-        for batch in batches {
-            if batch.status == "pending" || batch.status == "failed" {
-                selectedBatchIds.insert(batch.id)
-            }
-        }
+        // Don't pre-select any batches - let user choose
     }
     
     private func toggleSelection(_ batchId: Int64) {
