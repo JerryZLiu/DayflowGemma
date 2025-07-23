@@ -402,9 +402,66 @@ final class AnalysisManager: AnalysisManaging {
                 let firstChunkStartDate = Date(timeIntervalSince1970: TimeInterval(firstChunk.startTs))
                 print("First chunk starts at real time: \(firstChunkStartDate)")
 
-                // Mark batch as completed since we've successfully processed the timeline cards
-                DispatchQueue.main.async { [weak self] in
-                    self?.updateBatchStatus(batchId: batchId, status: "completed")
+                // Mark batch as completed immediately
+                self.updateBatchStatus(batchId: batchId, status: "completed")
+                
+                // Generate timelapses asynchronously for each timeline card
+                Task { @MainActor in
+                    for (index, cardId) in cardIds.enumerated() {
+                        guard index < activityCards.count else { continue }
+                        
+                        // Fetch the saved timeline card to get Unix timestamps
+                        guard let timelineCard = self.store.fetchTimelineCard(byId: cardId) else {
+                            print("Warning: Could not fetch timeline card \(cardId)")
+                            continue
+                        }
+                        
+                        // Fetch chunks that overlap with this card's time range using Unix timestamps
+                        let chunks = self.store.fetchChunksInTimeRange(
+                            startTs: timelineCard.startTs,
+                            endTs: timelineCard.endTs
+                        )
+                        
+                        if chunks.isEmpty {
+                            print("No chunks found for timeline card \(cardId) [\(timelineCard.startTimestamp) - \(timelineCard.endTimestamp)]")
+                            continue
+                        }
+                        
+                        do {
+                            print("Generating timelapse for card \(cardId): '\(timelineCard.title)' [\(timelineCard.startTimestamp) - \(timelineCard.endTimestamp)]")
+                            print("  Found \(chunks.count) chunks in time range")
+                            
+                            // Convert chunks to URLs
+                            let chunkURLs = chunks.compactMap { URL(fileURLWithPath: $0.fileUrl) }
+                            
+                            // Stitch chunks together
+                            let stitchedVideo = try await self.videoProcessingService.prepareVideoForProcessing(urls: chunkURLs)
+                            print("  Stitched video prepared at: \(stitchedVideo.path)")
+                            
+                            // Generate timelapse
+                            let timelapseURL = await self.videoProcessingService.generatePersistentTimelapseURL(
+                                for: Date(timeIntervalSince1970: TimeInterval(timelineCard.startTs)),
+                                originalFileName: String(cardId)
+                            )
+                            
+                            try await self.videoProcessingService.generateTimelapse(
+                                sourceVideoURL: stitchedVideo,
+                                outputTimelapseFileURL: timelapseURL,
+                                speedupFactor: 20,  // 20x as requested
+                                outputFPS: 24
+                            )
+                            
+                            // Update timeline card with timelapse URL
+                            self.store.updateTimelineCardVideoURL(cardId: cardId, videoSummaryURL: timelapseURL.path)
+                            print("✅ Generated timelapse for card \(cardId): \(timelapseURL.path)")
+                            
+                            // Cleanup temp file
+                            await self.videoProcessingService.cleanupTemporaryFile(at: stitchedVideo)
+                        } catch {
+                            print("❌ Error generating timelapse for card \(cardId): \(error)")
+                        }
+                    }
+                    print("✅ Timelapse generation complete for batch \(batchId)")
                 }
 
             case .failure(let err):

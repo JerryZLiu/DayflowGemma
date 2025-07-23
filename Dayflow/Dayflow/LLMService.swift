@@ -219,7 +219,7 @@ final class LLMService: LLMServicing {
                 )
                 
                 // Replace old cards with new ones in the time range
-                let insertedCardIds = StorageManager.shared.replaceTimelineCardsInRange(
+                let (insertedCardIds, deletedVideoPaths) = StorageManager.shared.replaceTimelineCardsInRange(
                     from: oneHourAgo,
                     to: currentTime,
                     with: cards.map { card in
@@ -236,6 +236,13 @@ final class LLMService: LLMServicing {
                     },
                     batchId: batchId
                 )
+                
+                // Clean up deleted video files
+                for path in deletedVideoPaths {
+                    if let url = URL(string: path) {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                }
                 
                 // Mark batch as complete
                 StorageManager.shared.updateBatch(batchId, status: "analyzed")

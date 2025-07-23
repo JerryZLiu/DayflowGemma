@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import AVKit
 
 // MARK: - Data Models
 struct TimelineActivity: Identifiable {
@@ -581,6 +582,9 @@ struct TimelineActivityCard: View {
     let durationInMinutes: Int
     let onTap: () -> Void
     
+    @State private var avPlayer: AVPlayer? = nil
+    @State private var isPlaying: Bool = false
+    
     // Category gradient colors
     private func gradientColors(for category: String) -> [Color] {
         switch category.lowercased() {
@@ -667,7 +671,59 @@ struct TimelineActivityCard: View {
                         .padding(.top, 8)
                     }
                     
-                    if let screenshot = activity.screenshot {
+                    // Show video if available
+                    if let videoPath = activity.videoSummaryURL,
+                       !videoPath.isEmpty,
+                       let videoURL = URL(string: videoPath) {
+                        VStack(spacing: 8) {
+                            if let player = avPlayer {
+                                VideoPlayer(player: player)
+                                    .frame(height: 300)
+                                    .cornerRadius(12)
+                                    .shadow(radius: 5)
+                                
+                                // Play/Pause controls
+                                HStack(spacing: 12) {
+                                    Button(action: {
+                                        if isPlaying {
+                                            player.pause()
+                                            isPlaying = false
+                                        } else {
+                                            player.play()
+                                            isPlaying = true
+                                        }
+                                    }) {
+                                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.black.opacity(0.7))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    
+                                    Spacer()
+                                    
+                                    Text("Timelapse")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.black.opacity(0.5))
+                                }
+                                .padding(.horizontal, 4)
+                            } else {
+                                // Loading state
+                                VStack {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle())
+                                    Text("Loading video...")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.black.opacity(0.5))
+                                }
+                                .frame(height: 300)
+                                .frame(maxWidth: .infinity)
+                                .background(Color.black.opacity(0.05))
+                                .cornerRadius(12)
+                            }
+                        }
+                        .padding(.top, 8)
+                    } else if let screenshot = activity.screenshot {
+                        // Fall back to screenshot if no video
                         Image(nsImage: screenshot)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -707,6 +763,27 @@ struct TimelineActivityCard: View {
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 3)
         .shadow(color: .black.opacity(0.03), radius: 3, x: 0, y: 1)
         .onTapGesture(perform: onTap)
+        .onChange(of: isExpanded) { newValue in
+            if newValue {
+                // Initialize player when expanded
+                if let videoPath = activity.videoSummaryURL,
+                   !videoPath.isEmpty,
+                   let videoURL = URL(string: videoPath) {
+                    avPlayer = AVPlayer(url: videoURL)
+                }
+            } else {
+                // Clean up player when collapsed
+                avPlayer?.pause()
+                avPlayer = nil
+                isPlaying = false
+            }
+        }
+        .onDisappear {
+            // Clean up player when view disappears
+            avPlayer?.pause()
+            avPlayer = nil
+            isPlaying = false
+        }
     }
     
     private func formatTimeRange(start: Date, end: Date) -> String {

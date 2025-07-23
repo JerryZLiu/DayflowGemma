@@ -71,6 +71,7 @@ protocol StorageManaging: Sendable {
 
     // Fetch unprocessed (completed + not yet batched) chunks
     func fetchUnprocessedChunks(olderThan oldestAllowed: Int) -> [RecordingChunk]
+    func fetchChunksInTimeRange(startTs: Int, endTs: Int) -> [RecordingChunk]
 
     // Analysis‑batch management
     func saveBatch(startTs: Int, endTs: Int, chunkIds: [Int64]) -> Int64?
@@ -85,11 +86,12 @@ protocol StorageManaging: Sendable {
     func saveTimelineCardShell(batchId: Int64, card: TimelineCardShell) -> Int64?
     func updateTimelineCardVideoURL(cardId: Int64, videoSummaryURL: String)
     func fetchTimelineCards(forBatch batchId: Int64) -> [TimelineCard]
+    func fetchTimelineCard(byId id: Int64) -> TimelineCardWithTimestamps?
 
     // Timeline Queries
     func fetchTimelineCards(forDay day: String) -> [TimelineCard]
     func fetchTimelineCardsByTimeRange(from: Date, to: Date) -> [TimelineCard]
-    func replaceTimelineCardsInRange(from: Date, to: Date, with: [TimelineCardShell], batchId: Int64) -> [Int64]
+    func replaceTimelineCardsInRange(from: Date, to: Date, with: [TimelineCardShell], batchId: Int64) -> (insertedIds: [Int64], deletedVideoPaths: [String])
 
     // Note: Transcript storage methods removed in favor of Observations
     
@@ -202,6 +204,23 @@ struct TimelineCardShell: Sendable {
     let distractions: [Distraction]? // Keep this, it's part of the initial save
     // No videoSummaryURL here, as it's added later
     // No batchId here, as it's passed as a separate parameter to the save function
+}
+
+// Extended TimelineCard with timestamp fields for internal use
+struct TimelineCardWithTimestamps {
+    let id: Int64
+    let startTimestamp: String
+    let endTimestamp: String
+    let startTs: Int
+    let endTs: Int
+    let category: String
+    let subcategory: String
+    let title: String
+    let summary: String
+    let detailedSummary: String
+    let day: String
+    let distractions: [Distraction]?
+    let videoSummaryURL: String?
 }
 
 // MARK: - Implementation ------------------------------------------------------
@@ -496,6 +515,24 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             }
         }) ?? []
     }
+    
+    /// Fetch chunks that overlap with a specific time range
+    func fetchChunksInTimeRange(startTs: Int, endTs: Int) -> [RecordingChunk] {
+        (try? db.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT * FROM chunks 
+                WHERE status = 'completed'
+                  AND ((start_ts <= ? AND end_ts >= ?) 
+                       OR (start_ts >= ? AND start_ts <= ?)
+                       OR (end_ts >= ? AND end_ts <= ?))
+                ORDER BY start_ts ASC
+            """, arguments: [endTs, startTs, startTs, endTs, startTs, endTs])
+            .map { r in
+                RecordingChunk(id: r["id"], startTs: r["start_ts"], endTs: r["end_ts"],
+                              fileUrl: r["file_url"], status: r["status"])
+            }
+        }) ?? []
+    }
 
     // MARK: – Timeline‑cards --------------------------------------------------
 
@@ -735,7 +772,41 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         return result
     }
     
-    func replaceTimelineCardsInRange(from: Date, to: Date, with newCards: [TimelineCardShell], batchId: Int64) -> [Int64] {
+    /// Fetch a specific timeline card by ID including timestamp fields
+    func fetchTimelineCard(byId id: Int64) -> TimelineCardWithTimestamps? {
+        let decoder = JSONDecoder()
+        
+        return try? db.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM timeline_cards WHERE id = ?
+            """, arguments: [id]) else { return nil }
+            
+            // Decode distractions from metadata JSON
+            var distractions: [Distraction]? = nil
+            if let metadataString: String = row["metadata"],
+               let jsonData = metadataString.data(using: .utf8) {
+                distractions = try? decoder.decode([Distraction].self, from: jsonData)
+            }
+            
+            return TimelineCardWithTimestamps(
+                id: id,
+                startTimestamp: row["start"] ?? "",
+                endTimestamp: row["end"] ?? "",
+                startTs: row["start_ts"] ?? 0,
+                endTs: row["end_ts"] ?? 0,
+                category: row["category"],
+                subcategory: row["subcategory"],
+                title: row["title"],
+                summary: row["summary"],
+                detailedSummary: row["detailed_summary"],
+                day: row["day"],
+                distractions: distractions,
+                videoSummaryURL: row["video_summary_url"]
+            )
+        }
+    }
+    
+    func replaceTimelineCardsInRange(from: Date, to: Date, with newCards: [TimelineCardShell], batchId: Int64) -> (insertedIds: [Int64], deletedVideoPaths: [String]) {
         let fromTs = Int(from.timeIntervalSince1970)
         let toTs = Int(to.timeIntervalSince1970)
         
@@ -746,6 +817,7 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         
         let encoder = JSONEncoder()
         var insertedIds: [Int64] = []
+        var videoPaths: [String] = []
         
         // Setup date formatter for parsing clock times
         let timeFormatter = DateFormatter()
@@ -753,7 +825,18 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         
         try? db.write { db in
-            // First, fetch the cards that will be deleted for debugging
+            // First, fetch the video paths that will be deleted
+            let videoRows = try Row.fetchAll(db, sql: """
+                SELECT video_summary_url FROM timeline_cards
+                WHERE ((start_ts < ? AND end_ts > ?)
+                   OR (start_ts >= ? AND start_ts < ?))
+                   AND video_summary_url IS NOT NULL
+            """, arguments: [toTs, fromTs, fromTs, toTs])
+            
+            videoPaths = videoRows.compactMap { $0["video_summary_url"] as? String }
+            print("  🎥 DEBUG: Found \(videoPaths.count) video paths to delete")
+            
+            // Fetch the cards that will be deleted for debugging
             let cardsToDelete = try Row.fetchAll(db, sql: """
                 SELECT id, start, end, title FROM timeline_cards
                 WHERE (start_ts < ? AND end_ts > ?)
@@ -862,8 +945,8 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             }
         }
         
-        print("  📋 DEBUG: Returning \(insertedIds.count) inserted card IDs")
-        return insertedIds
+        print("  📋 DEBUG: Returning \(insertedIds.count) inserted card IDs and \(videoPaths.count) video paths")
+        return (insertedIds, videoPaths)
     }
 
     // Note: Transcript storage methods removed in favor of Observations table
