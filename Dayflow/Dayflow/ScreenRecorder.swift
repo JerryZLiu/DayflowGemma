@@ -29,6 +29,33 @@ private enum C {
     static let fps    : Int32        = 1         // keep @ 1 fps - NOTE: This is intentionally low!
 }
 
+// MARK: - SCStream Error Codes
+private enum SCStreamErrorCode: Int {
+    case noDisplayOrWindow = -3807          // Transient error, display disconnected
+    case userStoppedViaSystemUI = -3808     // User clicked "Stop Sharing" in system UI
+    case userDeclined = -3817               // Alternative code for user stop
+    case connectionInvalid = -3805          // Stream connection became invalid
+    case attemptToStopStreamState = -3802   // Stream already stopping
+    
+    var isUserInitiated: Bool {
+        switch self {
+        case .userStoppedViaSystemUI, .userDeclined:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    var shouldAutoRestart: Bool {
+        switch self {
+        case .noDisplayOrWindow:
+            return true  // Transient error, should retry
+        case .userStoppedViaSystemUI, .userDeclined, .connectionInvalid, .attemptToStopStreamState:
+            return false // User action or unrecoverable error
+        }
+    }
+}
+
 #if DEBUG
 @inline(__always) func dbg(_ msg: @autoclosure () -> String) { print("[Recorder] \(msg())") }
 #else
@@ -104,8 +131,40 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func shouldRetry(_ err: Error) -> Bool {
         let scErr = err as NSError
-        return scErr.domain == SCStreamErrorDomain               // "com.apple.ScreenCaptureKit.SCStreamErrorDomain"
-            && scErr.code == -3807                                // kSCStreamErrorNoDisplayOrWindow
+        guard scErr.domain == SCStreamErrorDomain else { return false }
+        
+        // Check if it's a known error code
+        if let errorCode = SCStreamErrorCode(rawValue: Int(scErr.code)) {
+            dbg("SCStream error code: \(scErr.code) (\(errorCode)) - shouldAutoRestart: \(errorCode.shouldAutoRestart)")
+            return errorCode.shouldAutoRestart
+        }
+        
+        // Unknown error code - log it and don't retry
+        dbg("Unknown SCStream error code: \(scErr.code) - not retrying")
+        return false
+    }
+    
+    private func isUserInitiatedStop(_ err: Error) -> Bool {
+        let scErr = err as NSError
+        guard scErr.domain == SCStreamErrorDomain else { return false }
+        
+        // Check if it's a known user-initiated error code
+        if let errorCode = SCStreamErrorCode(rawValue: Int(scErr.code)) {
+            return errorCode.isUserInitiated
+        }
+        
+        // Check userInfo for additional context
+        if let userInfo = scErr.userInfo,
+           let reason = userInfo[NSLocalizedFailureReasonErrorKey] as? String {
+            let userStopIndicators = ["user stopped", "stopped by user", "user cancelled", "stop sharing"]
+            let lowercasedReason = reason.lowercased()
+            if userStopIndicators.contains(where: { lowercasedReason.contains($0) }) {
+                dbg("Detected user stop from error reason: \(reason)")
+                return true
+            }
+        }
+        
+        return false
     }
 
     // MARK: stream setup -------------------------------------------------
@@ -156,6 +215,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
             q.async { self.isStarting = false }
 
+            // Check if this is a user-initiated stop
+            if isUserInitiatedStop(error) {
+                dbg("User stopped recording during startup - updating app state")
+                Task { @MainActor in self.forceStopFlag() }
+                return
+            }
+            
             // Treat `noDisplay` like other transient issues
             let retryable = shouldRetry(error) || (error as? RecorderError) == .noDisplay
 
@@ -325,10 +391,33 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
     // MARK: error & sleep / wake ----------------------------------------
     func stream(_ s: SCStream, didStopWithError err: Error) {
-        dbg("stream error – \(err.localizedDescription)")
+        let scErr = err as NSError
+        dbg("stream stopped – domain: \(scErr.domain), code: \(scErr.code), description: \(err.localizedDescription)")
+        
+        // Log userInfo for debugging
+        if let userInfo = scErr.userInfo, !userInfo.isEmpty {
+            dbg("Error userInfo: \(userInfo)")
+        }
+        
         stop()
-        Task { @MainActor in
-            if AppState.shared.isRecording { start() }
+        
+        // Check if this was a user-initiated stop
+        if isUserInitiatedStop(err) {
+            dbg("User stopped recording through system UI - updating app state")
+            Task { @MainActor in
+                AppState.shared.isRecording = false
+            }
+        } else if shouldRetry(err) {
+            dbg("Retryable error - will restart if recording flag is set")
+            Task { @MainActor in
+                if AppState.shared.isRecording { start() }
+            }
+        } else {
+            // Unknown or non-retryable error - update app state to stop
+            dbg("Non-retryable error - stopping recording")
+            Task { @MainActor in
+                AppState.shared.isRecording = false
+            }
         }
     }
 

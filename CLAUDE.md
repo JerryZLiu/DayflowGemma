@@ -34,3 +34,4 @@ NEVER create extensions on classes that need to access private properties. Inste
 ALWAYS ASK THE USER FOR PERMISSION, BEFORE WRITING ANY CODE, IF THE USER ASKS FOR SOMETHING, NEVER JUST STRAIGHT TO CODE, UNLESS THEY SAY EXPLICITLY. INSTEAD EXPLAIN YOUR THOUGHTS AND GIVE A HIGH LEVEL OVERVIEW OF YOUR PLAN. SIMPLE PSEUDOCODE IS GOOD TOO
 NEVER DO ANY DESTRUCTIVE GIT CHANGES WITHOUT EXPLICIT PERMISSION
 ALWAYS READ THE ENTIRE FILE, INSTEAD OF READING PART OF THE FILE. ALWAYS GATHER AS MUCH CODE CONTEXT AS POSSIBLE BEFORE PLANNING/CODING. DO NOT BE LAZY.
+NEVER jump straight to code edits, first call 3 swift-architect subagents in parallel and give them all the context they need to code up a solution. then evaluate all of their code solutions. if they all mostly agree, implement their solution. if they disagree significantly, ask me about which approach is best before proceeding. 
