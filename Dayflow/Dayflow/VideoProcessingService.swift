@@ -168,7 +168,7 @@ actor VideoProcessingService {
     func generateTimelapse(sourceVideoURL: URL,
                           outputTimelapseFileURL: URL,
                           speedupFactor: Int = 8,
-                          outputFPS: Int = 30) async throws {
+                          outputFPS: Int = 15) async throws {  // Reduced from 30 to 15 FPS
         let asset = AVURLAsset(url: sourceVideoURL)
         guard let assetTrack = try await asset.loadTracks(withMediaType: .video).first else {
             print("Error: No video track in \(sourceVideoURL.lastPathComponent)")
@@ -203,12 +203,6 @@ actor VideoProcessingService {
         compositionTrack.scaleTimeRange(CMTimeRange(start: .zero, duration: duration),
                                        toDuration: scaledDuration)
         
-        // Set up export session
-        guard let exportSession = AVAssetExportSession(asset: composition,
-                                                      presetName: AVAssetExportPresetHighestQuality) else {
-            throw VideoProcessingError.exportSessionCreationFailed
-        }
-        
         // Ensure output directory exists
         let outputDir = outputTimelapseFileURL.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: outputDir.path) {
@@ -220,14 +214,55 @@ actor VideoProcessingService {
             try? fileManager.removeItem(at: outputTimelapseFileURL)
         }
         
-        // Configure export
-        exportSession.outputURL = outputTimelapseFileURL
-        exportSession.outputFileType = .mp4
-        exportSession.shouldOptimizeForNetworkUse = true
+        // Use custom compression with lower bitrate for smaller files
+        guard let writer = try? AVAssetWriter(outputURL: outputTimelapseFileURL, fileType: .mp4) else {
+            throw VideoProcessingError.assetWriterCreationFailed(nil)
+        }
         
-        // Set up video composition to maintain proper dimensions and apply transform
+        // Cap resolution at 1080p
+        let outputWidth = min(width, 1920)
+        let outputHeight = min(height, 1080)
+        
+        // Custom bitrate: 3 Mbps for 1080p timelapse (much lower than default ~8 Mbps)
+        let bitrate = 3_000_000
+        
+        print("🎬 Timelapse encoding: \(outputWidth)×\(outputHeight) @ \(outputFPS)fps, bitrate: \(bitrate/1_000_000)Mbps")
+        
+        let outputSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: outputWidth,
+            AVVideoHeightKey: outputHeight,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: bitrate,
+                AVVideoMaxKeyFrameIntervalKey: 150, // Keyframe every 10 seconds at 15fps
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264MainAutoLevel,
+                AVVideoExpectedSourceFrameRateKey: outputFPS,
+                AVVideoAverageNonDroppableFrameRateKey: outputFPS
+            ]
+        ]
+        
+        let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
+        writerInput.expectsMediaDataInRealTime = false
+        writerInput.transform = preferredTransform
+        
+        guard writer.canAdd(writerInput) else {
+            throw VideoProcessingError.assetWriterInputCreationFailed
+        }
+        writer.add(writerInput)
+        
+        // Create reader for the composition
+        guard let reader = try? AVAssetReader(asset: composition) else {
+            throw VideoProcessingError.assetReaderCreationFailed(nil)
+        }
+        
+        let readerOutput = AVAssetReaderVideoCompositionOutput(
+            videoTracks: composition.tracks(withMediaType: .video),
+            videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        )
+        
+        // Apply video composition for proper rendering
         let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = CGSize(width: width, height: height)
+        videoComposition.renderSize = CGSize(width: outputWidth, height: outputHeight)
         videoComposition.frameDuration = CMTime(value: 1, timescale: Int32(outputFPS))
         
         let instruction = AVMutableVideoCompositionInstruction()
@@ -238,14 +273,41 @@ actor VideoProcessingService {
         instruction.layerInstructions = [layerInstruction]
         videoComposition.instructions = [instruction]
         
-        exportSession.videoComposition = videoComposition
+        readerOutput.videoComposition = videoComposition
         
-        // Export
-        await exportSession.export()
+        guard reader.canAdd(readerOutput) else {
+            throw VideoProcessingError.assetReaderCreationFailed(nil)
+        }
+        reader.add(readerOutput)
         
-        guard exportSession.status == .completed else {
-            print("Timelapse export failed. Status: \(exportSession.status). Error: \(exportSession.error?.localizedDescription ?? "No error description available")")
-            throw VideoProcessingError.exportFailed(exportSession.error)
+        // Start reading and writing
+        guard writer.startWriting() else {
+            throw VideoProcessingError.assetWriterStartFailed(nil)
+        }
+        writer.startSession(atSourceTime: .zero)
+        reader.startReading()
+        
+        // Process video frames
+        await withCheckedContinuation { continuation in
+            writerInput.requestMediaDataWhenReady(on: DispatchQueue(label: "com.dayflow.timelapse")) {
+                while writerInput.isReadyForMoreMediaData {
+                    if reader.status == .reading,
+                       let sampleBuffer = readerOutput.copyNextSampleBuffer() {
+                        writerInput.append(sampleBuffer)
+                    } else {
+                        writerInput.markAsFinished()
+                        writer.finishWriting {
+                            continuation.resume()
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        
+        guard writer.status == .completed else {
+            print("Timelapse export failed. Status: \(writer.status). Error: \(writer.error?.localizedDescription ?? "No error description available")")
+            throw VideoProcessingError.exportFailed(writer.error)
         }
     }
 

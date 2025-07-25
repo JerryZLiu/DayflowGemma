@@ -254,12 +254,15 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     start_ts INTEGER NOT NULL,
                     end_ts   INTEGER NOT NULL,
-                    file_url TEXT    NOT NULL UNIQUE,
+                    file_url TEXT    NOT NULL,
                     status   TEXT    NOT NULL DEFAULT 'recording'
                 );
                 CREATE INDEX IF NOT EXISTS idx_chunks_status   ON chunks(status);
                 CREATE INDEX IF NOT EXISTS idx_chunks_start_ts ON chunks(start_ts);
             """)
+            
+            // Add is_deleted column if it doesn't exist
+            try db.execute(sql: "ALTER TABLE chunks ADD COLUMN is_deleted INTEGER DEFAULT 0")
 
             try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS analysis_batches (
@@ -1246,20 +1249,75 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
     private let purgeQ = DispatchQueue(label: "com.dayflow.storage.purge", qos: .background)
 
     private func purgeIfNeeded() {
-        return // Temporarily disabled
-        /*
-        purgeQ.async {
-            guard let size = try? self.fileMgr.allocatedSizeOfDirectory(at: self.root), size > self.quota else { return }
-            try? self.db.write { db in
-                let old = try Row.fetchAll(db, sql: "SELECT id, file_url FROM chunks WHERE status = 'completed' ORDER BY start_ts ASC LIMIT 20")
-                for r in old {
-                    guard let id: Int64 = r["id"], let path: String = r["file_url"] else { continue }
-                    try? self.fileMgr.removeItem(atPath: path)
-                    try db.execute(sql: "DELETE FROM chunks WHERE id = ?", arguments: [id])
+        purgeQ.async { [weak self] in
+            guard let self = self else { return }
+            
+            do {
+                // Check current size
+                let currentSize = try self.fileMgr.allocatedSizeOfDirectory(at: self.root)
+                let sizeInGB = Double(currentSize) / (1024 * 1024 * 1024)
+                print("📁 Storage check: \(String(format: "%.2f", sizeInGB)) GB used")
+                
+                // 3 days cutoff for all chunks
+                let cutoffDate = Date().addingTimeInterval(-3 * 24 * 60 * 60)
+                let cutoffTimestamp = Int(cutoffDate.timeIntervalSince1970)
+                
+                // Clean up if over 20GB
+                if currentSize > 10_000_000_000 {
+                    print("🧹 Starting cleanup (current: \(String(format: "%.2f", sizeInGB)) GB)")
+                    
+                    try self.db.write { db in
+                        // Get chunks older than 3 days with file paths still set
+                        let oldChunks = try Row.fetchAll(db, sql: """
+                            SELECT id, file_url, start_ts 
+                            FROM chunks 
+                            WHERE start_ts < ?
+                            AND file_url IS NOT NULL
+                            AND file_url != ''
+                            AND (is_deleted = 0 OR is_deleted IS NULL)
+                            ORDER BY start_ts ASC 
+                            LIMIT 500
+                        """, arguments: [cutoffTimestamp])
+                        
+                        var deletedCount = 0
+                        var freedSpace: Int = 0
+                        
+                        for chunk in oldChunks {
+                            guard let id: Int64 = chunk["id"], 
+                                  let path: String = chunk["file_url"] else { continue }
+                            
+                            // Delete physical file
+                            if FileManager.default.fileExists(atPath: path) {
+                                if let attrs = try? self.fileMgr.attributesOfItem(atPath: path),
+                                   let fileSize = attrs[.size] as? NSNumber {
+                                    freedSpace += fileSize.intValue
+                                }
+                                try? self.fileMgr.removeItem(atPath: path)
+                            }
+                            
+                            // Mark as deleted
+                            try db.execute(sql: """
+                                UPDATE chunks 
+                                SET is_deleted = 1 
+                                WHERE id = ?
+                            """, arguments: [id])
+                            
+                            deletedCount += 1
+                            
+                            // Stop if we've freed enough space (under 10GB)
+                            if currentSize - freedSpace < 10_000_000_000 {
+                                break
+                            }
+                        }
+                        
+                        let freedGB = Double(freedSpace) / (1024 * 1024 * 1024)
+                        print("✅ Cleanup complete: deleted \(deletedCount) files, freed \(String(format: "%.2f", freedGB)) GB")
+                    }
                 }
+            } catch {
+                print("❌ Purge error: \(error)")
             }
         }
-        */
     }
 }
 

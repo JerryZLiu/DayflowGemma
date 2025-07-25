@@ -239,8 +239,12 @@ final class LLMService: LLMServicing {
                 
                 // Clean up deleted video files
                 for path in deletedVideoPaths {
-                    if let url = URL(string: path) {
-                        try? FileManager.default.removeItem(at: url)
+                    let url = URL(fileURLWithPath: path)
+                    do {
+                        try FileManager.default.removeItem(at: url)
+                        print("🗑️ Deleted timelapse: \(path)")
+                    } catch {
+                        print("❌ Failed to delete timelapse: \(path) - \(error)")
                     }
                 }
                 

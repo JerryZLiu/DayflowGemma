@@ -24,8 +24,7 @@ import CoreGraphics
 import CoreText
 
 private enum C {
-    static let width  = 1280
-    static let height = 800
+    static let targetHeight = 1080               // Target ~1080p resolution
     static let chunk  : TimeInterval = 15        // seconds per file
     static let fps    : Int32        = 1         // keep @ 1 fps - NOTE: This is intentionally low!
 }
@@ -77,6 +76,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var isStarting = false            // guards concurrent starts
     private var isFinishing = false           // guards concurrent finishes
     private var resumeAfterPause = false      // remember intent across interruptions
+    private var recordingWidth: Int = 1280   // Store recording dimensions
+    private var recordingHeight: Int = 800
 
     // MARK: public control ----------------------------------------------
     func start() {
@@ -125,11 +126,27 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
             // 3. configuration
             let cfg                 = SCStreamConfiguration()
-            cfg.width               = C.width
-            cfg.height              = C.height
+            
+            // Calculate dimensions to maintain aspect ratio at ~1080p
+            let displayWidth = display.width
+            let displayHeight = display.height
+            let aspectRatio = Double(displayWidth) / Double(displayHeight)
+            
+            // Scale to target height while maintaining aspect ratio
+            let targetHeight = C.targetHeight
+            let targetWidth = Int(Double(targetHeight) * aspectRatio)
+            
+            cfg.width               = targetWidth
+            cfg.height              = targetHeight
             cfg.capturesAudio       = false
             cfg.pixelFormat         = kCVPixelFormatType_32BGRA
             cfg.minimumFrameInterval = CMTime(value: 1, timescale: C.fps)
+            
+            // Store dimensions for later use
+            recordingWidth = targetWidth
+            recordingHeight = targetHeight
+            
+            dbg("Recording at \(targetWidth)×\(targetHeight) (display: \(displayWidth)×\(displayHeight), ratio: \(String(format: "%.2f", aspectRatio)):1)")
 
             // 4. kick-off
             try await startStream(filter: filter, config: cfg)
@@ -189,13 +206,17 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         StorageManager.shared.registerChunk(url: url)
         do {
             let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
+            
+            // Increase bitrate for higher resolution (roughly 2.5 Mbps for 1080p at 1fps)
+            let bitrate = 2500000 // 2.5 Mbps
+            
             let inp = AVAssetWriterInput(mediaType: .video,
                                          outputSettings: [
                                              AVVideoCodecKey  : AVVideoCodecType.h264,
-                                             AVVideoWidthKey  : C.width,
-                                             AVVideoHeightKey : C.height,
+                                             AVVideoWidthKey  : recordingWidth,
+                                             AVVideoHeightKey : recordingHeight,
                                              AVVideoCompressionPropertiesKey: [
-                                                 AVVideoAverageBitRateKey: 1000000, // 1 Mbps
+                                                 AVVideoAverageBitRateKey: bitrate,
                                                  AVVideoProfileLevelKey: AVVideoProfileLevelH264BaselineAutoLevel,
                                                  AVVideoMaxKeyFrameIntervalKey: 30
                                              ]

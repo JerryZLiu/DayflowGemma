@@ -260,8 +260,8 @@ struct TimelineView: View {
     }
     
     private func loadVideoThumbnail(from urlString: String?) -> NSImage? {
-        guard let urlString = urlString,
-              let url = URL(string: urlString) else { return nil }
+        guard let urlString = urlString else { return nil }
+        let url = URL(fileURLWithPath: urlString)
         
         // Extract first frame from video
         return extractFrame(from: url, at: 0.5) // Get frame at 0.5 seconds
@@ -673,8 +673,8 @@ struct TimelineActivityCard: View {
                     
                     // Show video if available
                     if let videoPath = activity.videoSummaryURL,
-                       !videoPath.isEmpty,
-                       let videoURL = URL(string: videoPath) {
+                       !videoPath.isEmpty {
+                        let videoURL = URL(fileURLWithPath: videoPath)
                         VStack(spacing: 8) {
                             if let player = avPlayer {
                                 VideoPlayer(player: player)
@@ -767,8 +767,8 @@ struct TimelineActivityCard: View {
             if newValue {
                 // Initialize player when expanded
                 if let videoPath = activity.videoSummaryURL,
-                   !videoPath.isEmpty,
-                   let videoURL = URL(string: videoPath) {
+                   !videoPath.isEmpty {
+                    let videoURL = URL(fileURLWithPath: videoPath)
                     avPlayer = AVPlayer(url: videoURL)
                 }
             } else {
