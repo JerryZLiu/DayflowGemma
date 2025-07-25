@@ -16,8 +16,6 @@ final class GeminiDirectProvider: LLMProvider {
     
     func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date, videoDuration: TimeInterval) async throws -> (observations: [Observation], log: LLMCall) {
         let callStart = Date()
-        print("\n🚀 Starting Gemini observation generation at \(formatTime(callStart))")
-        print("📹 Video duration: \(String(format: "%.2f", videoDuration)) seconds (\(String(format: "%.1f", videoDuration/60)) minutes)")
         
         // First, save video data to a temporary file
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -155,11 +153,6 @@ final class GeminiDirectProvider: LLMProvider {
             prompt: finalTranscriptionPrompt
         )
         
-        print("\n📄 Raw Gemini Observation Generation Output:")
-        print(String(repeating: "=", count: 80))
-        print(response)
-        print(String(repeating: "=", count: 80))
-        print("\n")
         
         let videoTranscripts = try parseTranscripts(response)
         
@@ -174,20 +167,12 @@ final class GeminiDirectProvider: LLMProvider {
             let tolerance: TimeInterval = 120.0 // 2 minutes
             if Double(startSeconds) < -tolerance || Double(endSeconds) > videoDuration + tolerance {
                 print("❌ VALIDATION ERROR: Observation timestamps exceed video duration!")
-                print("   Video duration: \(String(format: "%.2f", videoDuration))s")
-                print("   Observation: \(chunk.startTimestamp) - \(chunk.endTimestamp) (\(startSeconds)s - \(endSeconds)s)")
                 hasValidationErrors = true
                 return nil
             }
             let startDate = batchStartTime.addingTimeInterval(TimeInterval(startSeconds))
             let endDate = batchStartTime.addingTimeInterval(TimeInterval(endSeconds))
             
-            print("\n🔍 Observation Timestamp Conversion:")
-            print("  Video timestamp: \(chunk.startTimestamp) - \(chunk.endTimestamp)")
-            print("  Seconds from video start: \(startSeconds) - \(endSeconds)")
-            print("  Batch start time: \(batchStartTime)")
-            print("  Calculated dates: \(startDate) - \(endDate)")
-            print("  Unix timestamps: \(Int(startDate.timeIntervalSince1970)) - \(Int(endDate.timeIntervalSince1970))")
             
             return Observation(
                 id: nil,
@@ -223,14 +208,12 @@ final class GeminiDirectProvider: LLMProvider {
         )
         
         let duration = Date().timeIntervalSince(callStart)
-        print("✅ Gemini observation generation completed in \(String(format: "%.2f", duration)) seconds")
         
         return (observations, log)
     }
     
     func generateActivityCards(observations: [Observation], context: ActivityGenerationContext) async throws -> (cards: [ActivityCard], log: LLMCall) {
         let callStart = Date()
-        print("\n🚀 Starting Gemini activity card generation at \(formatTime(callStart))")
         
         // Convert observations to human-readable format for the prompt
         let transcriptText = observations.map { obs in
@@ -241,8 +224,6 @@ final class GeminiDirectProvider: LLMProvider {
         }.joined(separator: "\n")
         
         // Building transcript text from observations
-        
-        print("transcript_text: \(transcriptText)")
         
         // Convert existing cards to JSON string with pretty printing
         let encoder = JSONEncoder()
@@ -367,14 +348,11 @@ final class GeminiDirectProvider: LLMProvider {
                 ]
         """
         
-        print("Previous cards: \(existingCardsString)")
-        print("New observations: \(transcriptText)")
         
         // Initial request
         var response = try await geminiCardsRequest(
             prompt: activityGenerationPrompt
         )
-        print("Output: \(response)")
         var cards = try parseActivityCards(response)
         
         // Combined validation and retry loop
@@ -389,9 +367,7 @@ final class GeminiDirectProvider: LLMProvider {
             // Check if both validations pass
             if coverageValid && durationValid {
                 if retryCount > 0 {
-                    print("✅ All validations passed after \(retryCount) retries")
                 } else {
-                    print("✅ All validations passed on first attempt")
                 }
                 break
             }
@@ -402,7 +378,6 @@ final class GeminiDirectProvider: LLMProvider {
             var errorMessages: [String] = []
             
             if !coverageValid && coverageError != nil {
-                print("⚠️ Time coverage validation failed: \(coverageError!)")
                 errorMessages.append("""
                 TIME COVERAGE ERROR:
                 \(coverageError!)
@@ -412,11 +387,8 @@ final class GeminiDirectProvider: LLMProvider {
             }
             
             if !durationValid && durationError != nil {
-                print("⚠️ Timeline duration validation failed: \(durationError!)")
                 if !coverageValid || retryCount == 1 {
                     // Print raw output on first failure or if both validations fail
-                    print("\n📄 Raw LLM output:")
-                    print(response)
                 }
                 errorMessages.append("""
                 DURATION ERROR:
@@ -427,11 +399,9 @@ final class GeminiDirectProvider: LLMProvider {
             }
             
             if retryCount >= maxRetries {
-                print("⚠️ Validation failed after \(maxRetries) retries. Proceeding with best effort.")
                 break
             }
             
-            print("🔄 Retrying with enhanced prompt (attempt \(retryCount)/\(maxRetries))...")
             
             // Enhanced prompt with all error details
             let retryPrompt = activityGenerationPrompt + """
@@ -457,7 +427,6 @@ final class GeminiDirectProvider: LLMProvider {
         )
         
         let duration = Date().timeIntervalSince(callStart)
-        print("✅ Gemini activity card generation completed in \(String(format: "%.2f", duration)) seconds (including \(retryCount) retries)")
         
         return (cards, log)
     }
@@ -884,7 +853,6 @@ private func uploadResumable(data: Data, mimeType: String) async throws -> Strin
             }
             // Skip zero or very short duration cards (less than 0.1 minutes = 6 seconds)
             guard endMin - startMin >= 0.1 else {
-                print("⚠️ Skipping zero/short duration card: '\(card.title)' [\(card.startTime) - \(card.endTime)]")
                 continue
             }
             outputRanges.append(TimeRange(start: startMin, end: endMin))

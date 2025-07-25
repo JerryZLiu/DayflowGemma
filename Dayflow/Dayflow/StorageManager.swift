@@ -594,7 +594,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 }
             }
 
-            print("🔍 DEBUG: About to INSERT timeline card: '\(card.title)' [\(card.startTimestamp) - \(card.endTimestamp)] with timestamps [\(startTs) - \(endTs)]")
             
             // Calculate the day string from the start timestamp
             let dayString = self.dateFormatter.string(from: startDate)
@@ -611,7 +610,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 card.summary, card.category, card.subcategory, card.detailedSummary, distractionsString
             ])
             lastId = db.lastInsertedRowID
-            print("✅ DEBUG: INSERT successful, got ID: \(lastId ?? -1)")
         }
         return lastId
     }
@@ -732,9 +730,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         let fromTs = Int(from.timeIntervalSince1970)
         let toTs = Int(to.timeIntervalSince1970)
         
-        print("\n📊 DEBUG: fetchTimelineCardsByTimeRange called")
-        print("  From: \(from) (ts: \(fromTs))")
-        print("  To: \(to) (ts: \(toTs))")
         
         let cards: [TimelineCard]? = try? db.read { db in
             try Row.fetchAll(db, sql: """
@@ -768,10 +763,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             }
         }
         let result = cards ?? []
-        print("  📋 DEBUG: Fetched \(result.count) cards")
-        for (i, card) in result.enumerated() {
-            print("    Card \(i+1): '\(card.title)' [\(card.startTimestamp) - \(card.endTimestamp)]")
-        }
         return result
     }
     
@@ -813,10 +804,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
         let fromTs = Int(from.timeIntervalSince1970)
         let toTs = Int(to.timeIntervalSince1970)
         
-        print("\n🔄 DEBUG: replaceTimelineCardsInRange called")
-        print("  From: \(from) (ts: \(fromTs))")
-        print("  To: \(to) (ts: \(toTs))")
-        print("  New cards count: \(newCards.count)")
         
         let encoder = JSONEncoder()
         var insertedIds: [Int64] = []
@@ -837,7 +824,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             """, arguments: [toTs, fromTs, fromTs, toTs])
             
             videoPaths = videoRows.compactMap { $0["video_summary_url"] as? String }
-            print("  🎥 DEBUG: Found \(videoPaths.count) video paths to delete")
             
             // Fetch the cards that will be deleted for debugging
             let cardsToDelete = try Row.fetchAll(db, sql: """
@@ -846,13 +832,11 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                    OR (start_ts >= ? AND start_ts < ?)
             """, arguments: [toTs, fromTs, fromTs, toTs])
             
-            print("  🗑️ DEBUG: Will delete \(cardsToDelete.count) existing cards:")
             for card in cardsToDelete {
                 let id: Int64 = card["id"]
                 let start: String = card["start"]
                 let end: String = card["end"]
                 let title: String = card["title"]
-                print("    - Card ID \(id): '\(title)' [\(start) - \(end)]")
             }
             
             // Delete existing cards in the range using timestamp columns
@@ -870,9 +854,7 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             """, arguments: [toTs, fromTs, fromTs, toTs]) ?? 0
             
             if remainingCount > 0 {
-                print("  ⚠️ WARNING: \(remainingCount) cards still remain after DELETE!")
             } else {
-                print("  ✅ DEBUG: DELETE successful, all cards removed")
             }
             
             // Insert new cards
@@ -944,11 +926,9 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 // Capture the ID of the inserted card
                 let insertedId = db.lastInsertedRowID
                 insertedIds.append(insertedId)
-                print("  ✅ DEBUG: Inserted card with ID: \(insertedId)")
             }
         }
         
-        print("  📋 DEBUG: Returning \(insertedIds.count) inserted card IDs and \(videoPaths.count) video paths")
         return (insertedIds, videoPaths)
     }
 
@@ -1256,7 +1236,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 // Check current size
                 let currentSize = try self.fileMgr.allocatedSizeOfDirectory(at: self.root)
                 let sizeInGB = Double(currentSize) / (1024 * 1024 * 1024)
-                print("📁 Storage check: \(String(format: "%.2f", sizeInGB)) GB used")
                 
                 // 3 days cutoff for all chunks
                 let cutoffDate = Date().addingTimeInterval(-3 * 24 * 60 * 60)
@@ -1264,7 +1243,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 
                 // Clean up if over 20GB
                 if currentSize > 10_000_000_000 {
-                    print("🧹 Starting cleanup (current: \(String(format: "%.2f", sizeInGB)) GB)")
                     
                     try self.db.write { db in
                         // Get chunks older than 3 days with file paths still set
@@ -1311,7 +1289,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                         }
                         
                         let freedGB = Double(freedSpace) / (1024 * 1024 * 1024)
-                        print("✅ Cleanup complete: deleted \(deletedCount) files, freed \(String(format: "%.2f", freedGB)) GB")
                     }
                 }
             } catch {

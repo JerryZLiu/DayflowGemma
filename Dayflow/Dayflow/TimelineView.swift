@@ -138,6 +138,9 @@ struct TimelineView: View {
     
     // MARK: - Timer Management
     private func startRefreshTimer() {
+        // Invalidate any existing timer before creating a new one
+        refreshTimer?.invalidate()
+        
         // Refresh every 60 seconds
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { _ in
             loadActivities()

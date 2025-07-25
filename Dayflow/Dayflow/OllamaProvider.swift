@@ -20,10 +20,6 @@ final class OllamaProvider: LLMProvider {
     
     func transcribeVideo(videoData: Data, mimeType: String, prompt: String, batchStartTime: Date, videoDuration: TimeInterval) async throws -> (observations: [Observation], log: LLMCall) {
         let callStart = Date()
-        print("\n🚀 [OLLAMA] Starting observation generation at \(formatTime(callStart))")
-        print("[OLLAMA] Video size: \(videoData.count / 1024 / 1024) MB")
-        print("[OLLAMA] Batch start time: \(batchStartTime)")
-        print("📹 [OLLAMA] Video duration: \(String(format: "%.2f", videoDuration)) seconds (\(String(format: "%.1f", videoDuration/60)) minutes)")
         
         // Save video to temporary file for processing
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -31,31 +27,23 @@ final class OllamaProvider: LLMProvider {
         defer { try? FileManager.default.removeItem(at: tempURL) }
         
         // Extract frames at intervals
-        print("[OLLAMA] Extracting frames at \(frameExtractionInterval)s intervals...")
         let extractionStart = Date()
         let frames = try await extractFrames(from: tempURL)
         let extractionTime = Date().timeIntervalSince(extractionStart)
-        print("[OLLAMA] Extracted \(frames.count) frames in \(String(format: "%.2f", extractionTime))s")
         
         // Process each frame with Ollama
         var observations: [Observation] = []
-        print("[OLLAMA] Processing frames with Qwen 2.5 VL...")
         
         for (index, frame) in frames.enumerated() {
             let frameStart = Date()
-            print("[OLLAMA] Processing frame \(index + 1)/\(frames.count) at timestamp \(frame.timestamp)s...")
             
             let observation = try await analyzeFrame(frame, batchStartTime: batchStartTime)
             observations.append(observation)
             
             let frameTime = Date().timeIntervalSince(frameStart)
-            print("[OLLAMA] Frame \(index + 1) processed in \(String(format: "%.2f", frameTime))s")
-            print("[OLLAMA] Observation: \(observation.observation)")
         }
         
         let totalTime = Date().timeIntervalSince(callStart)
-        print("[OLLAMA] Total transcription time: \(String(format: "%.2f", totalTime))s")
-        print("[OLLAMA] Average time per frame: \(String(format: "%.2f", totalTime / Double(frames.count)))s\n")
         
         let log = LLMCall(
             timestamp: callStart,
@@ -65,14 +53,12 @@ final class OllamaProvider: LLMProvider {
         )
         
         let duration = Date().timeIntervalSince(callStart)
-        print("✅ [OLLAMA] Observation generation completed in \(String(format: "%.2f", duration)) seconds")
         
         return (observations, log)
     }
     
     func generateActivityCards(observations: [Observation], context: ActivityGenerationContext) async throws -> (cards: [ActivityCard], log: LLMCall) {
         let callStart = Date()
-        print("\n🚀 [OLLAMA] Starting activity card generation at \(formatTime(callStart))")
         
         // Format observations for the prompt
         let observationsText = observations.map { obs in
@@ -127,7 +113,6 @@ final class OllamaProvider: LLMProvider {
         
         // Debug: Log raw response
         let rawResponse = String(data: responseData, encoding: .utf8) ?? "Unable to decode"
-        print("[OLLAMA] Raw activity cards response: \(rawResponse.prefix(200))...")
         
         let cards = try parseActivityCards(from: responseData)
         
@@ -139,7 +124,6 @@ final class OllamaProvider: LLMProvider {
         )
         
         let duration = Date().timeIntervalSince(callStart)
-        print("✅ [OLLAMA] Activity card generation completed in \(String(format: "%.2f", duration)) seconds")
         
         return (cards, log)
     }
@@ -188,17 +172,14 @@ final class OllamaProvider: LLMProvider {
         // First try to decode as array
         do {
             let responseCards = try JSONDecoder().decode([ResponseCard].self, from: data)
-            print("[OLLAMA] Successfully parsed \(responseCards.count) activity cards")
             return responseCards.map(convertCard)
         } catch {
             // Try to decode as single object
             do {
                 let singleCard = try JSONDecoder().decode(ResponseCard.self, from: data)
-                print("[OLLAMA] Successfully parsed single activity card")
                 return [convertCard(singleCard)]
             } catch {
                 // If that fails, try to extract JSON from the response
-                print("[OLLAMA] Failed to parse directly, attempting to extract JSON...")
             
             guard let responseString = String(data: data, encoding: .utf8) else {
                 throw NSError(domain: "OllamaProvider", code: 6, userInfo: [NSLocalizedDescriptionKey: "Failed to decode response as string"])
@@ -210,7 +191,6 @@ final class OllamaProvider: LLMProvider {
                 let jsonSubstring = responseString[startIndex...endIndex]
                 if let jsonData = jsonSubstring.data(using: .utf8) {
                     let responseCards = try JSONDecoder().decode([ResponseCard].self, from: jsonData)
-                    print("[OLLAMA] Successfully extracted and parsed \(responseCards.count) activity cards")
                     return responseCards.map(convertCard)
                 }
             }
@@ -232,7 +212,6 @@ final class OllamaProvider: LLMProvider {
         let duration = try await asset.load(.duration)
         let durationSeconds = CMTimeGetSeconds(duration)
         
-        print("[OLLAMA] Video duration: \(String(format: "%.2f", durationSeconds))s (\(String(format: "%.2f", durationSeconds/60)) minutes)")
         
         guard durationSeconds > 0 else {
             throw NSError(domain: "OllamaProvider", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid video duration"])
@@ -246,7 +225,6 @@ final class OllamaProvider: LLMProvider {
         var frames: [FrameData] = []
         var currentTime: TimeInterval = 0
         let expectedFrames = Int(durationSeconds / frameExtractionInterval) + 1
-        print("[OLLAMA] Expecting to extract ~\(expectedFrames) frames")
         
         while currentTime < durationSeconds {
             let cmTime = CMTime(seconds: currentTime, preferredTimescale: 600)
@@ -263,7 +241,6 @@ final class OllamaProvider: LLMProvider {
                         let base64Data = Data(base64String.utf8)
                         
                         frames.append(FrameData(image: base64Data, timestamp: currentTime))
-                        print("[OLLAMA] Extracted frame \(frames.count) at \(String(format: "%.2f", currentTime))s")
                     }
                 }
             } catch {
@@ -273,7 +250,6 @@ final class OllamaProvider: LLMProvider {
             currentTime += frameExtractionInterval
         }
         
-        print("[OLLAMA] Successfully extracted \(frames.count) frames")
         return frames
     }
     
@@ -321,7 +297,6 @@ final class OllamaProvider: LLMProvider {
         
         if let data = jpegData {
             let sizeKB = Double(data.count) / 1024.0
-            print("[OLLAMA] Frame size: \(cgImage.width)x\(cgImage.height) -> \(String(format: "%.1f", sizeKB)) KB")
         }
         
         return jpegData
@@ -432,7 +407,6 @@ final class OllamaProvider: LLMProvider {
             throw NSError(domain: "OllamaProvider", code: 4, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
         }
         
-        print("[OLLAMA] API response: \(httpResponse.statusCode) in \(String(format: "%.2f", apiTime))s")
         
         guard httpResponse.statusCode == 200 else {
             let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"

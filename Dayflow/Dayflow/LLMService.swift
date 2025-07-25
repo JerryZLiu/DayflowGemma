@@ -136,11 +136,6 @@ final class LLMService: LLMServicing {
                 let mimeType = "video/mp4"
                 // Video exported successfully
                 
-                // Clean up temp file
-                defer {
-                    try? FileManager.default.removeItem(at: tempURL)
-                }
-                
                 // Get batch start time for timestamp conversion
                 let batchStartDate = Date(timeIntervalSince1970: TimeInterval(batchStartTs))
                 
@@ -152,6 +147,9 @@ final class LLMService: LLMServicing {
                     batchStartTime: batchStartDate,
                     videoDuration: totalDuration
                 )
+                
+                // Clean up temp file after transcription is complete
+                try? FileManager.default.removeItem(at: tempURL)
                 
                 // Save observations to database
                 StorageManager.shared.saveObservations(batchId: batchId, observations: observations)

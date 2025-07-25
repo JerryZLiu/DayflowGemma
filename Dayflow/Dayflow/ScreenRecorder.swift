@@ -256,7 +256,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
             w.cancelWriting()
             StorageManager.shared.markChunkFailed(url: url)
             isFinishing = false
-            return reset()
+            reset()
+            return
         }
         // ─────────────────────────────────────────────────────────────────
 
@@ -264,7 +265,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
             w.cancelWriting()
             StorageManager.shared.markChunkFailed(url: url)
             isFinishing = false
-            return reset()
+            reset()
+            return
         }
 
         // 4. normal shutdown path
