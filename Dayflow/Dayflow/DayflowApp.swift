@@ -17,6 +17,32 @@ enum AppView: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
+// MARK: - New Blank UI Components
+struct BlankView: View {
+    let title: String
+    
+    var body: some View {
+        VStack {
+            Spacer()
+            Text(title)
+                .font(.largeTitle)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+}
+
+// MARK: - Blank UI Root View
+struct BlankUIRootView: View {
+    var body: some View {
+        Color(NSColor.windowBackgroundColor)
+            .ignoresSafeArea()
+            .frame(minWidth: 800, minHeight: 600)
+    }
+}
+
 // MARK: - Placeholder Settings View
 
 // Struct to manage category settings in the UI
@@ -390,19 +416,72 @@ struct AppRootView: View {
     @State private var currentAppView: AppView = .timeline
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("View", selection: $currentAppView) {
-                ForEach(AppView.allCases) { viewCase in
-                    Text(viewCase.rawValue).tag(viewCase)
+        ZStack {
+            // Main content fills the entire window
+            Group {
+                if currentAppView == .timeline {
+                    ContentView()
+                        .environmentObject(AppState.shared)
+                } else if currentAppView == .newTimeline {
+                    TimelineView()
+                } else if currentAppView == .dashboard {
+                    DashboardView()
+                } else if currentAppView == .settings {
+                    SettingsView()
+                } else {
+                    DebugView()
                 }
             }
-            .pickerStyle(SegmentedPickerStyle())
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor)) // Match window background
+            
+            // Floating toolbar at the top
+            VStack {
+                HStack {
+                    // Space for traffic lights - adjust based on your needs
+                    Color.clear
+                        .frame(width: 70, height: 1)
+                    
+                    Spacer()
+                    
+                    // Centered navigation with background
+                    Picker("View", selection: $currentAppView) {
+                        ForEach(AppView.allCases) { viewCase in
+                            Text(viewCase.rawValue).tag(viewCase)
+                        }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .frame(width: 400)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(
+                        Capsule()
+                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.9))
+                            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    )
+                    
+                    Spacer()
+                    
+                    // Balance the right side
+                    Color.clear
+                        .frame(width: 70, height: 1)
+                }
+                .padding(.top, 8) // Small top padding to avoid traffic lights
+                
+                Spacer()
+            }
+        }
+        .frame(minWidth: 800, minHeight: 600)
+        .background(Color(NSColor.windowBackgroundColor))
+        .ignoresSafeArea() // Extend content into title bar area
+    }
+}
 
-            Divider()
+// Alternative: Borderless Window Root View (no toolbar at all)
+struct BorderlessAppRootView: View {
+    @State private var currentAppView: AppView = .timeline
 
-            // Conditional content based on selection
+    var body: some View {
+        ZStack {
+            // Main content
             if currentAppView == .timeline {
                 ContentView()
                     .environmentObject(AppState.shared)
@@ -415,7 +494,109 @@ struct AppRootView: View {
             } else {
                 DebugView()
             }
+            
+            // Floating view switcher in top-right corner
+            VStack {
+                HStack {
+                    Spacer()
+                    Picker("View", selection: $currentAppView) {
+                        ForEach(AppView.allCases) { viewCase in
+                            Text(viewCase.rawValue).tag(viewCase)
+                        }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .frame(width: 300)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(NSColor.windowBackgroundColor).opacity(0.9))
+                            .shadow(radius: 2)
+                    )
+                }
+                Spacer()
+            }
+            .padding()
         }
+        .frame(minWidth: 800, minHeight: 600)
+        .background(Color(NSColor.windowBackgroundColor))
+        .ignoresSafeArea()
+    }
+}
+
+// Visual Effect View for native macOS blur effect
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .headerView
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = blendingMode
+        view.material = material
+        view.state = .active
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
+
+// Alternative minimalist root view
+struct MinimalistAppRootView: View {
+    @State private var currentAppView: AppView = .timeline
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Minimal toolbar with integrated background
+            HStack(spacing: 20) {
+                // Traffic light space
+                Color.clear
+                    .frame(width: 70, height: 40)
+                
+                // Navigation buttons as individual toggles
+                ForEach(AppView.allCases) { viewCase in
+                    Button(action: { currentAppView = viewCase }) {
+                        Text(viewCase.rawValue)
+                            .font(.system(size: 13, weight: currentAppView == viewCase ? .semibold : .regular))
+                            .foregroundColor(currentAppView == viewCase ? .primary : .secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                currentAppView == viewCase ?
+                                Color.accentColor.opacity(0.1) : Color.clear
+                            )
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 50)
+            .background(Color(NSColor.windowBackgroundColor))
+            
+            Divider()
+                .opacity(0.2)
+            
+            // Content
+            Group {
+                if currentAppView == .timeline {
+                    ContentView()
+                        .environmentObject(AppState.shared)
+                } else if currentAppView == .newTimeline {
+                    TimelineView()
+                } else if currentAppView == .dashboard {
+                    DashboardView()
+                } else if currentAppView == .settings {
+                    SettingsView()
+                } else {
+                    DebugView()
+                }
+            }
+        }
+        .frame(minWidth: 800, minHeight: 600)
     }
 }
 
@@ -423,17 +604,33 @@ struct AppRootView: View {
 struct DayflowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @AppStorage("didOnboard") private var didOnboard = false
+    @AppStorage("useBlankUI") private var useBlankUI = true
 
     var body: some Scene {
         WindowGroup {
             if didOnboard {
-                // Use AppRootView instead of ContentView directly
-                AppRootView()
-                    // AppState.shared is already passed down to ContentView inside AppRootView
+                // Switch between old and new UI
+                if useBlankUI {
+                    BlankUIRootView()
+                } else {
+                    AppRootView()
+                }
             } else {
                 OnboardingFlow()
                     .environmentObject(AppState.shared)
             }
         }
+        .windowStyle(.hiddenTitleBar)
+        .commands {
+            // Remove the "New Window" command if you want a single window app
+            CommandGroup(replacing: .newItem) { }
+            
+            // Add View menu to toggle UI
+            CommandMenu("View") {
+                Toggle("Use Blank UI", isOn: $useBlankUI)
+                    .keyboardShortcut("B", modifiers: [.command, .shift])
+            }
+        }
+        .defaultSize(width: 1200, height: 800)
     }
 }
