@@ -249,81 +249,63 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
     // MARK: – Schema / migrations
     private func migrate() {
         try? db.write { db in
+            // Create all tables with their final schema
             try db.execute(sql: """
+                -- Chunks table: stores video recording segments
                 CREATE TABLE IF NOT EXISTS chunks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     start_ts INTEGER NOT NULL,
-                    end_ts   INTEGER NOT NULL,
-                    file_url TEXT    NOT NULL,
-                    status   TEXT    NOT NULL DEFAULT 'recording'
+                    end_ts INTEGER NOT NULL,
+                    file_url TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'recording',
+                    is_deleted INTEGER DEFAULT 0
                 );
-                CREATE INDEX IF NOT EXISTS idx_chunks_status   ON chunks(status);
+                CREATE INDEX IF NOT EXISTS idx_chunks_status ON chunks(status);
                 CREATE INDEX IF NOT EXISTS idx_chunks_start_ts ON chunks(start_ts);
-            """)
-            
-            // Add is_deleted column if it doesn't exist
-            try db.execute(sql: "ALTER TABLE chunks ADD COLUMN is_deleted INTEGER DEFAULT 0")
-
-            try db.execute(sql: """
+                
+                -- Analysis batches: groups chunks for LLM processing
                 CREATE TABLE IF NOT EXISTS analysis_batches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     batch_start_ts INTEGER NOT NULL,
-                    batch_end_ts   INTEGER NOT NULL,
-                    status         TEXT    NOT NULL DEFAULT 'pending',
-                    reason         TEXT,
-                    llm_metadata   TEXT,
+                    batch_end_ts INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    reason TEXT,
+                    llm_metadata TEXT,
                     detailed_transcription TEXT,
-                    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_analysis_batches_status ON analysis_batches(status);
-            """)
-
-            // Attempt to add the new columns if the table pre-dates them
-            let llmMetadataExists = try Bool.fetchOne(db, sql: """
-                SELECT COUNT(*) > 0 FROM pragma_table_info('analysis_batches') WHERE name = 'llm_metadata'
-            """) ?? false
-            
-            if !llmMetadataExists {
-                try db.execute(sql: "ALTER TABLE analysis_batches ADD COLUMN llm_metadata TEXT")
-            }
-            
-            let detailedTranscriptionExists = try Bool.fetchOne(db, sql: """
-                SELECT COUNT(*) > 0 FROM pragma_table_info('analysis_batches') WHERE name = 'detailed_transcription'
-            """) ?? false
-            
-            if !detailedTranscriptionExists {
-                try db.execute(sql: "ALTER TABLE analysis_batches ADD COLUMN detailed_transcription TEXT")
-            }
-
-            try db.execute(sql: """
+                
+                -- Junction table linking batches to chunks
                 CREATE TABLE IF NOT EXISTS batch_chunks (
                     batch_id INTEGER NOT NULL REFERENCES analysis_batches(id) ON DELETE CASCADE,
-                    chunk_id INTEGER NOT NULL REFERENCES chunks(id)          ON DELETE RESTRICT,
+                    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE RESTRICT,
                     PRIMARY KEY (batch_id, chunk_id)
                 );
-            """)
-
-            try db.execute(sql: """
+                
+                -- Timeline cards: stores activity summaries
                 CREATE TABLE IF NOT EXISTS timeline_cards (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    batch_id   INTEGER REFERENCES analysis_batches(id) ON DELETE CASCADE,
-                    start   TEXT NOT NULL, -- Renamed from start_ts
-                    end     TEXT NOT NULL, -- Renamed from end_ts
-                    day        DATE    NOT NULL,
-                    title      TEXT    NOT NULL,
+                    batch_id INTEGER REFERENCES analysis_batches(id) ON DELETE CASCADE,
+                    start TEXT NOT NULL,       -- Clock time (e.g., "2:30 PM")
+                    end TEXT NOT NULL,         -- Clock time (e.g., "3:45 PM")
+                    start_ts INTEGER,          -- Unix timestamp
+                    end_ts INTEGER,            -- Unix timestamp
+                    day DATE NOT NULL,
+                    title TEXT NOT NULL,
                     summary TEXT,
-                    category    TEXT    NOT NULL,
+                    category TEXT NOT NULL,
                     subcategory TEXT,
                     detailed_summary TEXT,
-                    metadata    TEXT, -- For distractions JSON
-                    video_summary_url TEXT, -- Link to video summary on filesystem
-                    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    metadata TEXT,             -- For distractions JSON
+                    video_summary_url TEXT,    -- Link to video summary on filesystem
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                 CREATE INDEX IF NOT EXISTS idx_timeline_cards_day ON timeline_cards(day);
-            """)
-            
-            // NEW: Observations table
-            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_timeline_cards_day ON timeline_cards(day);
+                CREATE INDEX IF NOT EXISTS idx_timeline_cards_start_ts ON timeline_cards(start_ts);
+                CREATE INDEX IF NOT EXISTS idx_timeline_cards_time_range ON timeline_cards(start_ts, end_ts);
+                
+                -- Observations: stores LLM transcription outputs
                 CREATE TABLE IF NOT EXISTS observations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     batch_id INTEGER NOT NULL REFERENCES analysis_batches(id) ON DELETE CASCADE,
@@ -338,73 +320,6 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
                 CREATE INDEX IF NOT EXISTS idx_observations_start_ts ON observations(start_ts);
                 CREATE INDEX IF NOT EXISTS idx_observations_time_range ON observations(start_ts, end_ts);
             """)
-            
-            // Migration: Add timestamp columns to timeline_cards
-            let columnExists = try Bool.fetchOne(db, sql: """
-                SELECT COUNT(*) > 0 FROM pragma_table_info('timeline_cards') WHERE name = 'start_ts'
-            """) ?? false
-            
-            if !columnExists {
-                // Add the new columns
-                try db.execute(sql: "ALTER TABLE timeline_cards ADD COLUMN start_ts INTEGER")
-                try db.execute(sql: "ALTER TABLE timeline_cards ADD COLUMN end_ts INTEGER")
-                
-                // Create indexes on the new columns
-                try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_timeline_cards_start_ts ON timeline_cards(start_ts)")
-                try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_timeline_cards_time_range ON timeline_cards(start_ts, end_ts)")
-                
-                // Migrate existing data
-                let rows = try Row.fetchAll(db, sql: "SELECT id, day, start, end FROM timeline_cards")
-                
-                // Use class-level dateFormatter property
-                
-                let timeFormatter = DateFormatter()
-                timeFormatter.dateFormat = "h:mm a"
-                timeFormatter.locale = Locale(identifier: "en_US_POSIX")
-                
-                for row in rows {
-                    guard let id: Int64 = row["id"],
-                          let dayString: String = row["day"],
-                          let startString: String = row["start"],
-                          let endString: String = row["end"],
-                          let baseDate = self.dateFormatter.date(from: dayString) else { continue }
-                    
-                    // Parse start time
-                    if let startTime = timeFormatter.date(from: startString) {
-                        let calendar = Calendar.current
-                        let components = calendar.dateComponents([.hour, .minute], from: startTime)
-                        if let hour = components.hour, let minute = components.minute {
-                            var startDate = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: baseDate) ?? baseDate
-                            
-                            // Handle day boundary for times after midnight
-                            if hour < 4 {
-                                startDate = calendar.date(byAdding: .day, value: 1, to: startDate) ?? startDate
-                            }
-                            
-                            let startTs = Int(startDate.timeIntervalSince1970)
-                            
-                            // Parse end time
-                            if let endTime = timeFormatter.date(from: endString) {
-                                let endComponents = calendar.dateComponents([.hour, .minute], from: endTime)
-                                if let endHour = endComponents.hour, let endMinute = endComponents.minute {
-                                    var endDate = calendar.date(bySettingHour: endHour, minute: endMinute, second: 0, of: baseDate) ?? baseDate
-                                    
-                                    // Handle day boundary
-                                    if endHour < 4 || endDate < startDate {
-                                        endDate = calendar.date(byAdding: .day, value: 1, to: endDate) ?? endDate
-                                    }
-                                    
-                                    let endTs = Int(endDate.timeIntervalSince1970)
-                                    
-                                    // Update the row with timestamps
-                                    try db.execute(sql: "UPDATE timeline_cards SET start_ts = ?, end_ts = ? WHERE id = ?",
-                                                   arguments: [startTs, endTs, id])
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
