@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+    <key>ATSApplicationFontsPath</key>
+    <string>.</string>
+    <key>UIAppFonts</key>
+    <array>
+        <string>Nunito-VariableFont_wght.ttf</string>
+        <string>Nunito-Italic-VariableFont_wght.ttf</string>
+    </array>
+    <key>SUFeedURL</key>
+    <string>https://yourdomain.com/dayflow/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>YOUR_PUBLIC_KEY_HERE</string>
+</dict>
 </plist>

@@ -154,8 +154,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         
         // Check userInfo for additional context
-        if let userInfo = scErr.userInfo,
-           let reason = userInfo[NSLocalizedFailureReasonErrorKey] as? String {
+        let userInfo = scErr.userInfo
+        if let reason = userInfo[NSLocalizedFailureReasonErrorKey] as? String {
             let userStopIndicators = ["user stopped", "stopped by user", "user cancelled", "stop sharing"]
             let lowercasedReason = reason.lowercased()
             if userStopIndicators.contains(where: { lowercasedReason.contains($0) }) {
@@ -395,7 +395,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         dbg("stream stopped – domain: \(scErr.domain), code: \(scErr.code), description: \(err.localizedDescription)")
         
         // Log userInfo for debugging
-        if let userInfo = scErr.userInfo, !userInfo.isEmpty {
+        let userInfo = scErr.userInfo
+        if !userInfo.isEmpty {
             dbg("Error userInfo: \(userInfo)")
         }
         

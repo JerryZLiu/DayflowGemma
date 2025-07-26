@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Sparkle
 
 // MARK: - App View Enum (for top-level navigation)
 enum AppView: String, CaseIterable, Identifiable {
@@ -37,9 +38,15 @@ struct BlankView: View {
 // MARK: - Blank UI Root View
 struct BlankUIRootView: View {
     var body: some View {
-        Color(NSColor.windowBackgroundColor)
-            .ignoresSafeArea()
-            .frame(minWidth: 800, minHeight: 600)
+        GeometryReader { geometry in
+            Image("Dayflow")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+        }
+        .ignoresSafeArea()
+        .frame(minWidth: 800, minHeight: 600)
     }
 }
 
@@ -605,6 +612,9 @@ struct DayflowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @AppStorage("didOnboard") private var didOnboard = false
     @AppStorage("useBlankUI") private var useBlankUI = true
+    
+    // Sparkle updater
+    private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     var body: some Scene {
         WindowGroup {
@@ -621,6 +631,7 @@ struct DayflowApp: App {
             }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentMinSize)
         .commands {
             // Remove the "New Window" command if you want a single window app
             CommandGroup(replacing: .newItem) { }
@@ -629,6 +640,11 @@ struct DayflowApp: App {
             CommandMenu("View") {
                 Toggle("Use Blank UI", isOn: $useBlankUI)
                     .keyboardShortcut("B", modifiers: [.command, .shift])
+            }
+            
+            // Add Sparkle's update menu item
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: updaterController.updater)
             }
         }
         .defaultSize(width: 1200, height: 800)
