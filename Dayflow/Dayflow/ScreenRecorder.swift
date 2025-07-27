@@ -36,6 +36,7 @@ private enum SCStreamErrorCode: Int {
     case userDeclined = -3817               // Alternative code for user stop
     case connectionInvalid = -3805          // Stream connection became invalid
     case attemptToStopStreamState = -3802   // Stream already stopping
+    case stoppedBySystem = -3821            // System stopped stream (usually disk space)
     
     var isUserInitiated: Bool {
         switch self {
@@ -48,8 +49,8 @@ private enum SCStreamErrorCode: Int {
     
     var shouldAutoRestart: Bool {
         switch self {
-        case .noDisplayOrWindow:
-            return true  // Transient error, should retry
+        case .noDisplayOrWindow, .stoppedBySystem:
+            return true  // Transient errors, should retry
         case .userStoppedViaSystemUI, .userDeclined, .connectionInvalid, .attemptToStopStreamState:
             return false // User action or unrecoverable error
         }
