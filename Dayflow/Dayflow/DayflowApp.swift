@@ -611,7 +611,7 @@ struct MinimalistAppRootView: View {
 struct DayflowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @AppStorage("didOnboard") private var didOnboard = false
-    @AppStorage("useBlankUI") private var useBlankUI = true
+    @AppStorage("useBlankUI") private var useBlankUI = false
     
     // Sparkle updater
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
@@ -644,7 +644,9 @@ struct DayflowApp: App {
             
             // Add Sparkle's update menu item
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                Button("Check for Updates...") {
+                    updaterController.updater.checkForUpdates()
+                }
             }
         }
         .defaultSize(width: 1200, height: 800)

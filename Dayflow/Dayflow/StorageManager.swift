@@ -1118,8 +1118,8 @@ final class StorageManager: StorageManaging, @unchecked Sendable {
             """, arguments: [startTs, endTs]).map { row in
                 (
                     id: row["id"] as? Int64 ?? 0,
-                    startTs: row["batch_start_ts"] as? Int ?? 0,
-                    endTs: row["batch_end_ts"] as? Int ?? 0,
+                    startTs: Int(row["batch_start_ts"] as? Int64 ?? 0),
+                    endTs: Int(row["batch_end_ts"] as? Int64 ?? 0),
                     status: row["status"] as? String ?? ""
                 )
             }
