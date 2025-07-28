@@ -143,6 +143,7 @@ struct BatchRowView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current  // Use the system's current timezone
         
         let start = Date(timeIntervalSince1970: TimeInterval(batch.startTs))
         let end = Date(timeIntervalSince1970: TimeInterval(batch.endTs))
