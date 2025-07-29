@@ -206,6 +206,7 @@ final class LLMService: LLMServicing {
                 let context = ActivityGenerationContext(
                     userTaxonomy: userTaxonomy,
                     extractedTaxonomy: extractedTaxonomy,
+                    batchObservations: observations,
                     existingCards: existingActivityCards,
                     currentTime: currentTime
                 )
