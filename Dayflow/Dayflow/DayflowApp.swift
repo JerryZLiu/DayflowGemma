@@ -613,6 +613,11 @@ struct DayflowApp: App {
     @AppStorage("didOnboard") private var didOnboard = false
     @AppStorage("useBlankUI") private var useBlankUI = false
     
+    init() {
+        // Always reset onboarding for testing
+        UserDefaults.standard.set(false, forKey: "didOnboard")
+    }
+    
     // Sparkle updater
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
@@ -632,6 +637,7 @@ struct DayflowApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
+        .defaultSize(width: 1200, height: 800)
         .commands {
             // Remove the "New Window" command if you want a single window app
             CommandGroup(replacing: .newItem) { }

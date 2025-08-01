@@ -12,8 +12,32 @@ import ServiceManagement
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController!
     private var recorder : ScreenRecorder!
+    private var splashWindow: SplashWindow?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // Show splash window first
+        splashWindow = SplashWindow(onClose: {
+            // Show main window after splash closes
+            DispatchQueue.main.async {
+                // Find and show the main window
+                for window in NSApp.windows {
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    break
+                }
+            }
+        })
+        
+        // Hide main windows after splash is created
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            for window in NSApp.windows {
+                if window !== self.splashWindow {
+                    window.orderOut(nil)
+                }
+            }
+        }
+        
         statusBar = StatusBarController()   // safe: AppKit is ready, main thread
         recorder  = ScreenRecorder()        // hooks into AppState
         try? SMAppService.mainApp.register()// autostart at login

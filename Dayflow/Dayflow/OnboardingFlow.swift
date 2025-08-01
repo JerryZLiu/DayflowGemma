@@ -15,43 +15,115 @@ struct OnboardingFlow: View {
     @State private var step: Step = .welcome
     @AppStorage("didOnboard") private var didOnboard = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var timelineOffset: CGFloat = 300 // Start below screen
+    @State private var textOpacity: Double = 0
+    @State private var animatedText: AttributedString = AttributedString("")
+    private let fullText = "Be mindful about where you are spending your time."
     
     var body: some View {
-        VStack(spacing: 24) {
-            switch step {
-            case .welcome:
-                Heading("Welcome to Dayflow",
-                        "We'll record your screen (1 fps, 720 p) so you can see how you spend your day.")
-            case .screen:
-                Heading("Give screen-recording permission",
-                        "macOS will open System Settings → Screen Recording. Please enable Dayflow.")
-            case .access:
-                Heading("Optional: Accessibility",
-                        "If you'd like us to tag window titles, allow Accessibility access next.")
-            case .login:
-                Heading("Start Dayflow at Login",
-                        "We can automatically launch Dayflow each time you log in.")
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                    .toggleStyle(.switch)
-                    .onChange(of: launchAtLogin) { _, newValue in // <-- Use this signature
-                            setLogin(newValue) // Pass the newValue to your function
+        GeometryReader { geometry in
+            ZStack {
+                // Background image
+                Image("OnboardingBackgroundv2")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .ignoresSafeArea()
+                
+                if step == .welcome {
+                    // Text positioned in upper portion with typewriter effect
+                    VStack {
+                        Text(animatedText)
+                            .font(.custom("InstrumentSerif-Regular", size: min(36, geometry.size.width / 20)))
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.black.opacity(0.8))
+                            .padding(.horizontal, 20)
+                            .padding(.top, 120)
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(3)
+                            .frame(minHeight: 100) // Min height to prevent jumping
+                            .onAppear {
+                                // Start with invisible text, then reveal
+                                setupInitialText()
+                                animateTypewriter()
+                            }
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Timeline image at bottom that slides up
+                    VStack {
+                        Spacer()
+                        Image("OnboardingTimeline")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: min(geometry.size.width * 0.9, 800))
+                            .offset(y: timelineOffset)
+                            .opacity(timelineOffset > 0 ? 0 : 1)
+                            .onAppear {
+                                // Emil Kowalski principles:
+                                // - Use spring for natural movement
+                                // - Keep it fast (under 1s)
+                                // - Ease out for responsiveness
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.8, blendDuration: 0).delay(0.3)) {
+                                    timelineOffset = 0
+                                }
+                            }
+                    }
+                    .ignoresSafeArea(.all)
+                } else {
+                    // Other onboarding steps
+                    VStack(spacing: 24) {
+                        switch step {
+                        case .screen:
+                            Heading("Give screen-recording permission",
+                                    "macOS will open System Settings → Screen Recording. Please enable Dayflow.")
+                        case .access:
+                            Heading("Optional: Accessibility",
+                                    "If you'd like us to tag window titles, allow Accessibility access next.")
+                        case .login:
+                            Heading("Start Dayflow at Login",
+                                    "We can automatically launch Dayflow each time you log in.")
+                            Toggle("Launch at login", isOn: $launchAtLogin)
+                                .toggleStyle(.switch)
+                                .onChange(of: launchAtLogin) { _, newValue in
+                                    setLogin(newValue)
+                                }
+                        case .done:
+                            Heading("Setup Complete",
+                                    "You can now close this window; Dayflow will keep running in the menu-bar.")
+                        default:
+                            EmptyView()
                         }
-            case .done:
-                Heading("Setup Complete",
-                        "You can now close this window; Dayflow will keep running in the menu-bar.")
-            }
-            
-            HStack {
-                if step != .welcome { Button("Back")  { step.prev() } }
-                Spacer()
-                Button(step == .done ? "Finish" : "Next") {
-                    advance()
+                    }
+                    .padding(40)
+                    .frame(width: 420)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.ultraThinMaterial)
+                            .shadow(radius: 20)
+                    )
                 }
-                .keyboardShortcut(.defaultAction)
+                
+                // Navigation buttons
+                VStack {
+                    Spacer()
+                    HStack {
+                        if step != .welcome { 
+                            Button("Back") { 
+                                timelineOffset = 300 // Reset for animation
+                                step.prev() 
+                            } 
+                        }
+                        Spacer()
+                        Button(step == .done ? "Finish" : "Next") {
+                            advance()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(40)
+                }
             }
         }
-        .padding(40)
-        .frame(width: 420)
     }
     
     // MARK: – Flow control
@@ -69,6 +141,34 @@ struct OnboardingFlow: View {
             step.next()
         case .login:        step.next()
         case .done:         didOnboard = true
+        }
+    }
+    
+    // MARK: - Typewriter animation
+    private func setupInitialText() {
+        // Create attributed string with all text invisible
+        animatedText = AttributedString(fullText)
+        animatedText.foregroundColor = .clear
+    }
+    
+    private func animateTypewriter(at position: Int = 0) {
+        guard position <= fullText.count else { return }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+            // Create visible and invisible parts
+            let visibleText = String(fullText.prefix(position))
+            let invisibleText = String(fullText.suffix(fullText.count - position))
+            
+            // Build attributed string
+            let visiblePart = AttributedString(visibleText)
+            var invisiblePart = AttributedString(invisibleText)
+            invisiblePart.foregroundColor = .clear
+            
+            // Combine and update
+            animatedText = visiblePart + invisiblePart
+            
+            // Continue animation
+            animateTypewriter(at: position + 1)
         }
     }
     
@@ -92,7 +192,20 @@ private enum Step: Int, CaseIterable { case welcome, screen, access, login, done
 
 @ViewBuilder private func Heading(_ title: String, _ sub: String) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-        Text(title).font(.title2.bold())
-        Text(sub).font(.subheadline).foregroundColor(.secondary)
+        Text(title)
+            .font(.custom("InstrumentSerif-Regular", size: 28))
+            .fontWeight(.medium)
+        Text(sub)
+            .font(.system(size: 14))
+            .foregroundColor(.secondary)
+    }
+}
+
+// MARK: - Preview
+struct OnboardingFlow_Previews: PreviewProvider {
+    static var previews: some View {
+        OnboardingFlow()
+            .environmentObject(AppState.shared)
+            .frame(width: 1200, height: 800)
     }
 }

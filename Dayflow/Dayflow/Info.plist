@@ -8,6 +8,8 @@
     <array>
         <string>Nunito-VariableFont_wght.ttf</string>
         <string>Nunito-Italic-VariableFont_wght.ttf</string>
+        <string>InstrumentSerif-Regular.ttf</string>
+        <string>InstrumentSerif-Italic.ttf</string>
     </array>
     <key>SUFeedURL</key>
     <string>https://yourdomain.com/dayflow/appcast.xml</string>
