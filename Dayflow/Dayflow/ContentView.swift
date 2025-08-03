@@ -40,18 +40,6 @@ enum Zoom: Int, CaseIterable, Identifiable {
     }
 }
 
-extension Color {
-    init(hex: UInt, alpha: Double = 1.0) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xff) / 255,
-            green: Double((hex >> 8) & 0xff) / 255,
-            blue: Double(hex & 0xff) / 255,
-            opacity: alpha
-        )
-    }
-}
-
 private let appBG = Color(hex: 0xFDFDFD)
 
 // MARK: – Helpers --------------------------------------------------------------

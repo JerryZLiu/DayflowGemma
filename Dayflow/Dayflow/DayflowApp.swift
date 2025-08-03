@@ -418,105 +418,11 @@ struct AddSubcategorySheetView: View {
 }
 
 
-// MARK: - New Root View with Toggle
+// MARK: - New Root View with Transparent UI
 struct AppRootView: View {
-    @State private var currentAppView: AppView = .timeline
-    @AppStorage("useNewUI") private var useNewUI = true // Toggle for new UI
-
     var body: some View {
-        if useNewUI {
-            // New glass morphism UI
-            ZStack {
-                // Main content
-                Group {
-                    if currentAppView == .timeline {
-                        ContentView()
-                            .environmentObject(AppState.shared)
-                    } else if currentAppView == .newTimeline {
-                        TimelineView()
-                    } else if currentAppView == .dashboard {
-                        DashboardView()
-                    } else if currentAppView == .settings {
-                        SettingsView()
-                    } else {
-                        DebugView()
-                    }
-                }
-                
-                // Floating sidebar
-                VStack {
-                    HStack {
-                        SidebarNavigation(selectedView: $currentAppView)
-                            .padding(.leading, 20)
-                            .padding(.top, 20)
-                        
-                        Spacer()
-                    }
-                    
-                    Spacer()
-                }
-            }
-            .frame(minWidth: 1200, minHeight: 800)
-            .background(Color(NSColor.windowBackgroundColor))
-        } else {
-            // Original UI
-            ZStack {
-                // Main content fills the entire window
-                Group {
-                    if currentAppView == .timeline {
-                        ContentView()
-                            .environmentObject(AppState.shared)
-                    } else if currentAppView == .newTimeline {
-                        TimelineView()
-                    } else if currentAppView == .dashboard {
-                        DashboardView()
-                    } else if currentAppView == .settings {
-                        SettingsView()
-                    } else {
-                        DebugView()
-                    }
-                }
-                
-                // Floating toolbar at the top
-                VStack {
-                    HStack {
-                        // Space for traffic lights - adjust based on your needs
-                        Color.clear
-                            .frame(width: 70, height: 1)
-                        
-                        Spacer()
-                        
-                        // Centered navigation with background
-                        Picker("View", selection: $currentAppView) {
-                            ForEach(AppView.allCases) { viewCase in
-                                Text(viewCase.rawValue).tag(viewCase)
-                            }
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                        .frame(width: 400)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(
-                            Capsule()
-                                .fill(Color(NSColor.controlBackgroundColor).opacity(0.9))
-                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-                        )
-                        
-                        Spacer()
-                        
-                        // Balance the right side
-                        Color.clear
-                            .frame(width: 70, height: 1)
-                    }
-                    .padding(.top, 8) // Small top padding to avoid traffic lights
-                    
-                    Spacer()
-                }
-            }
-            .frame(minWidth: 800, minHeight: 600)
-            .background(Color(NSColor.windowBackgroundColor))
-            .ignoresSafeArea() // Extend content into title bar area
-        }
+        NewMainView()
+            .environmentObject(AppState.shared)
     }
 }
 
@@ -694,14 +600,6 @@ struct DayflowApp: App {
             // Remove the "New Window" command if you want a single window app
             CommandGroup(replacing: .newItem) { }
             
-            // Add View menu to toggle UI
-            CommandMenu("View") {
-                Toggle("Use New UI", isOn: .init(
-                    get: { UserDefaults.standard.bool(forKey: "useNewUI") },
-                    set: { UserDefaults.standard.set($0, forKey: "useNewUI") }
-                ))
-                    .keyboardShortcut("N", modifiers: [.command, .shift])
-            }
             
             // Add Sparkle's update menu item - disabled for now
             // CommandGroup(after: .appInfo) {
