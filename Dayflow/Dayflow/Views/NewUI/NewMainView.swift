@@ -115,7 +115,7 @@ struct NewMainView: View {
             .padding(.bottom, 20)
             .frame(maxHeight: .infinity)
         }
-        .frame(minWidth: 1200, minHeight: 800)
+        .frame(minWidth: 800, minHeight: 600)
         .sheet(isPresented: $showDatePicker) {
             DatePickerSheet(selectedDate: $selectedDate, isPresented: $showDatePicker)
         }
