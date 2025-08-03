@@ -33,6 +33,7 @@ private enum C {
 private enum SCStreamErrorCode: Int {
     case noDisplayOrWindow = -3807          // Transient error, display disconnected
     case userStoppedViaSystemUI = -3808     // User clicked "Stop Sharing" in system UI
+    case displayNotReady = -3815            // Failed to find displays/windows after wake/unlock
     case userDeclined = -3817               // Alternative code for user stop
     case connectionInvalid = -3805          // Stream connection became invalid
     case attemptToStopStreamState = -3802   // Stream already stopping
@@ -49,7 +50,7 @@ private enum SCStreamErrorCode: Int {
     
     var shouldAutoRestart: Bool {
         switch self {
-        case .noDisplayOrWindow, .stoppedBySystem:
+        case .noDisplayOrWindow, .displayNotReady, .stoppedBySystem:
             return true  // Transient errors, should retry
         case .userStoppedViaSystemUI, .userDeclined, .connectionInvalid, .attemptToStopStreamState:
             return false // User action or unrecoverable error
