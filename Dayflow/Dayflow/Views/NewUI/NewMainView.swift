@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVKit
+import AVFoundation
 
 struct NewMainView: View {
     @State private var selectedIcon: SidebarIcon = .analytics

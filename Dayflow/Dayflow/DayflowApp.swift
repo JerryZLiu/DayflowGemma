@@ -600,6 +600,17 @@ struct DayflowApp: App {
             // Remove the "New Window" command if you want a single window app
             CommandGroup(replacing: .newItem) { }
             
+            // Add custom menu items after the app info section
+            CommandGroup(after: .appInfo) {
+                Divider()
+                Button("Reset Onboarding") {
+                    // Reset the onboarding flag
+                    UserDefaults.standard.set(false, forKey: "didOnboard")
+                    // Force quit and restart the app to show onboarding
+                    NSApp.terminate(nil)
+                }
+                .keyboardShortcut("R", modifiers: [.command, .shift])
+            }
             
             // Add Sparkle's update menu item - disabled for now
             // CommandGroup(after: .appInfo) {
